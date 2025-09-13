@@ -1,0 +1,32 @@
+{
+  "name": "nodewatch",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "build": "tsc",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.3.3",
+    "@types/node-fetch": "^2.6.13",
+    "@types/tar": "^6.1.13",
+    "axios": "^1.12.1",
+    "convex": "^1.27.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "node-fetch": "^3.3.2",
+    "semgrep": "^0.0.1",
+    "tar": "^7.4.3",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}
