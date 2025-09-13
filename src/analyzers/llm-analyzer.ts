@@ -60,9 +60,9 @@ export class LLMAnalyzer {
     );
 
     for (const file of flaggedFiles) {
-      const content = files.get(file);
+      const content = files.get(file as string);
       if (content) {
-        suspicious.push({ path: file, content });
+        suspicious.push({ path: file as string, content });
       }
     }
 

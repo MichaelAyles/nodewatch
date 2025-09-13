@@ -2,10 +2,12 @@ import express from 'express';
 import cors from 'cors';
 import { AnalysisPipelineWithDB } from './pipeline-with-db';
 import { convexClient } from './convex-client';
-import { api } from '../convex/_generated/api';
+import { config } from './config';
+import { logger } from './utils/logger';
+import { getRedisClient, closeRedisConnection } from './utils/redis';
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = config.port;
 const pipeline = new AnalysisPipelineWithDB();
 
 app.use(cors());
@@ -25,17 +27,22 @@ app.post('/api/analyze', async (req, res) => {
   }
 
   try {
-    console.log(`Received analysis request for ${name}@${version || 'latest'}`);
+    logger.apiRequest('POST', '/api/analyze', req.ip);
+    logger.analysisStart(name, version || 'latest');
     
-    // Start analysis
+    const startTime = Date.now();
     const result = await pipeline.analyzePackage(name, version || 'latest');
+    const duration = Date.now() - startTime;
+    
+    logger.analysisComplete(name, version || 'latest', duration, result.overall_score);
     
     res.json({
       success: true,
       result
     });
   } catch (error: any) {
-    console.error('Analysis error:', error);
+    logger.analysisError(name, version || 'latest', error);
+    logger.apiError('POST', '/api/analyze', error, req.ip);
     res.status(500).json({
       success: false,
       error: error.message || 'Analysis failed'
@@ -48,9 +55,8 @@ app.get('/api/package/:name', async (req, res) => {
   const { name } = req.params;
   
   try {
-    const result = await convexClient.query(api.analysis.getPackageByName, {
-      name
-    });
+    // TODO: Replace with proper Convex API call once generated
+    const result = null; // await convexClient.query(api.analysis.getPackageByName, { name });
     
     if (result) {
       res.json({
@@ -74,9 +80,8 @@ app.get('/api/package/:name', async (req, res) => {
 // List recently analyzed packages
 app.get('/api/packages/recent', async (req, res) => {
   try {
-    const packages = await convexClient.query(api.packages.listPackages, {
-      limit: 20
-    });
+    // TODO: Replace with proper Convex API call once generated
+    const packages: any[] = []; // await convexClient.query(api.packages.listPackages, { limit: 20 });
     
     res.json({
       success: true,
@@ -209,9 +214,48 @@ app.get('/', (req, res) => {
   `);
 });
 
-app.listen(port, () => {
-  console.log(`NodeWatch server running at http://localhost:${port}`);
-  console.log(`API endpoint: http://localhost:${port}/api/analyze`);
+// Initialize Redis connection
+async function initializeServices() {
+  try {
+    const redis = getRedisClient();
+    await redis.ping();
+    logger.info('Redis connection established');
+  } catch (error) {
+    logger.error('Failed to connect to Redis', error);
+    process.exit(1);
+  }
+}
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  logger.info('SIGTERM received, shutting down gracefully');
+  await closeRedisConnection();
+  process.exit(0);
 });
+
+process.on('SIGINT', async () => {
+  logger.info('SIGINT received, shutting down gracefully');
+  await closeRedisConnection();
+  process.exit(0);
+});
+
+// Start server
+async function startServer() {
+  await initializeServices();
+  
+  app.listen(port, () => {
+    logger.info(`NodeWatch server running at http://localhost:${port}`);
+    logger.info(`Environment: ${config.nodeEnv}`);
+    logger.info(`Log level: ${config.logLevel}`);
+  });
+}
+
+// Only start server if this file is run directly
+if (require.main === module) {
+  startServer().catch((error) => {
+    logger.error('Failed to start server', error);
+    process.exit(1);
+  });
+}
 
 export default app;

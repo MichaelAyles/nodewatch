@@ -1,0 +1,96 @@
+version: '3.8'
+
+services:
+  # Main application
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - REDIS_URL=redis://redis:6379
+      - DOCKER_SOCKET_PATH=/var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./cache:/app/cache
+    depends_on:
+      - redis
+    restart: unless-stopped
+    networks:
+      - nodewatch
+
+  # Worker processes
+  worker:
+    build: .
+    command: ["node", "dist/worker.js"]
+    environment:
+      - NODE_ENV=development
+      - REDIS_URL=redis://redis:6379
+      - DOCKER_SOCKET_PATH=/var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./cache:/app/cache
+    depends_on:
+      - redis
+    restart: unless-stopped
+    deploy:
+      replicas: 3
+    networks:
+      - nodewatch
+
+  # Redis for job queue and caching
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    networks:
+      - nodewatch
+
+  # Redis Commander for debugging (development only)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    profiles:
+      - debug
+    networks:
+      - nodewatch
+
+  # Sandbox container for dynamic analysis
+  sandbox:
+    image: node:18-alpine
+    command: ["sleep", "infinity"]
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
+      - /var/tmp:noexec,nosuid,size=50m
+    networks:
+      - sandbox
+    profiles:
+      - sandbox
+
+volumes:
+  redis_data:
+
+networks:
+  nodewatch:
+    driver: bridge
+  sandbox:
+    driver: bridge
+    internal: true  # No external network access for sandbox

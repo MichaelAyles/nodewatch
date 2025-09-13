@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      target: builder
+    command: ["npm", "run", "dev"]
+    volumes:
+      - ./src:/app/src:ro
+      - ./convex:/app/convex:ro
+      - ./cache:/app/cache
+    environment:
+      - NODE_ENV=development
+      - LOG_LEVEL=debug
+    ports:
+      - "3000:3000"
+      - "9229:9229"  # Debug port
+
+  worker:
+    build:
+      context: .
+      target: builder
+    command: ["npm", "run", "worker:dev"]
+    volumes:
+      - ./src:/app/src:ro
+      - ./convex:/app/convex:ro
+      - ./cache:/app/cache
+    environment:
+      - NODE_ENV=development
+      - LOG_LEVEL=debug
+    deploy:
+      replicas: 1  # Fewer workers in development
+
+  # Enable Redis Commander by default in development
+  redis-commander:
+    profiles: []

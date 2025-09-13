@@ -55,7 +55,7 @@ export const listPackages = query({
       return await ctx.db
         .query("packages")
         .withIndex("by_status", (q) => 
-          q.eq("analysis_status", args.status)
+          q.eq("analysis_status", args.status!)
         )
         .take(args.limit || 100);
     }

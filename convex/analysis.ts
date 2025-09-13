@@ -101,14 +101,20 @@ export const getPackageByName = query({
     
     if (!pkg) return null;
 
-    return await ctx.query(api.analysis.getPackageAnalysis, {
-      package_id: pkg._id,
-    });
+    const analysisResults = await ctx.db
+      .query("analysis_results")
+      .withIndex("by_package", (q) => q.eq("package_id", pkg._id))
+      .collect();
+
+    const riskScore = await ctx.db
+      .query("risk_scores")
+      .withIndex("by_package", (q) => q.eq("package_id", pkg._id))
+      .first();
+
+    return {
+      package: pkg,
+      analysis_results: analysisResults,
+      risk_score: riskScore,
+    };
   },
 });
-
-const api = {
-  analysis: {
-    getPackageAnalysis,
-  },
-};
