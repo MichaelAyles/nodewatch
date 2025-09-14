@@ -1,37 +1,149 @@
+# Development Docker Compose Configuration
 version: '3.8'
 
 services:
-  app:
+  # API Server (Development)
+  api:
     build:
       context: .
-      target: builder
-    command: ["npm", "run", "dev"]
-    volumes:
-      - ./src:/app/src:ro
-      - ./convex:/app/convex:ro
-      - ./cache:/app/cache
+      dockerfile: Dockerfile.api
+      target: development
     environment:
       - NODE_ENV=development
+      - PORT=3000
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://nodewatch:nodewatch_dev@postgres:5432/nodewatch_dev
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - LOG_LEVEL=debug
     ports:
       - "3000:3000"
       - "9229:9229"  # Debug port
+    volumes:
+      - ./src:/app/src:ro
+      - ./package.json:/app/package.json:ro
+      - ./tsconfig.json:/app/tsconfig.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - backend
+    command: npm run dev
 
+  # Analysis Worker (Development)
   worker:
     build:
       context: .
-      target: builder
-    command: ["npm", "run", "worker:dev"]
-    volumes:
-      - ./src:/app/src:ro
-      - ./convex:/app/convex:ro
-      - ./cache:/app/cache
+      dockerfile: Dockerfile.worker
+      target: development
     environment:
       - NODE_ENV=development
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://nodewatch:nodewatch_dev@postgres:5432/nodewatch_dev
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - WORKER_ID=dev-worker-1
       - LOG_LEVEL=debug
-    deploy:
-      replicas: 1  # Fewer workers in development
+      - MAX_CONCURRENT_ANALYSES=1
+    volumes:
+      - ./src:/app/src:ro
+      - ./package.json:/app/package.json:ro
+      - ./tsconfig.json:/app/tsconfig.json:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - analysis-cache:/app/cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - backend
+      - sandbox
+    command: npm run worker:dev
 
-  # Enable Redis Commander by default in development
+  # PostgreSQL Database (Development)
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=nodewatch_dev
+      - POSTGRES_USER=nodewatch
+      - POSTGRES_PASSWORD=nodewatch_dev
+    ports:
+      - "5432:5432"  # Expose for external tools
+    volumes:
+      - postgres-dev-data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d:ro
+    restart: unless-stopped
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nodewatch -d nodewatch_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache & Job Queue (Development)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"  # Expose for external tools
+    command: redis-server --appendonly yes --maxmemory 256mb
+    volumes:
+      - redis-dev-data:/data
+    restart: unless-stopped
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Database Admin (Development)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@nodewatch.dev
+      - PGADMIN_DEFAULT_PASSWORD=admin
+      - PGADMIN_CONFIG_SERVER_MODE=False
+    ports:
+      - "8080:80"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    networks:
+      - backend
+    profiles:
+      - admin
+
+  # Redis Admin (Development)
   redis-commander:
-    profiles: []
+    image: rediscommander/redis-commander:latest
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    restart: unless-stopped
+    networks:
+      - backend
+    profiles:
+      - admin
+
+volumes:
+  postgres-dev-data:
+  redis-dev-data:
+  pgadmin-data:
+  analysis-cache:
+
+networks:
+  backend:
+    driver: bridge
+  sandbox:
+    driver: bridge
+    internal: true

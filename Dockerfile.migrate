@@ -1,0 +1,27 @@
+# Dockerfile for Database Migrations
+FROM node:18-alpine
+
+# Install system dependencies
+RUN apk add --no-cache \
+    curl \
+    ca-certificates \
+    postgresql-client
+
+WORKDIR /app
+
+# Copy package files and install dependencies
+COPY package*.json ./
+RUN npm ci --only=production
+
+# Copy migration scripts
+COPY database/ ./database/
+COPY dist/database/ ./dist/database/
+
+# Create migration user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S migrate -u 1001
+
+USER migrate
+
+# Run migrations
+CMD ["node", "dist/database/migrate.js"]

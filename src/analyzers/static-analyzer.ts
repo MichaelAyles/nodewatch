@@ -6,6 +6,7 @@ import {
   PatternType, 
   Severity 
 } from '../types';
+import { DeobfuscationEngine, StringAnalyzer } from '../utils/deobfuscation';
 
 // Enhanced pattern detection interfaces
 export interface ObfuscationAnalysis {
@@ -54,6 +55,8 @@ const POPULAR_PACKAGES = [
 ];
 
 export class EnhancedStaticAnalyzer {
+  private deobfuscationEngine = new DeobfuscationEngine();
+  
   private suspiciousPatterns = [
     // Code execution patterns
     {
@@ -278,11 +281,47 @@ export class EnhancedStaticAnalyzer {
         await this.analyzeFilePatterns(filePath, content, result);
       }
 
-      // Analyze all files for obfuscation
-      const obfuscationAnalysis = this.analyzeObfuscation(content);
-      if (obfuscationAnalysis.isObfuscated) {
+      // Enhanced deobfuscation analysis
+      const deobfuscationResult = await this.deobfuscationEngine.deobfuscate(content);
+      if (deobfuscationResult.confidence > 0.3) {
         result.riskIndicators.has_obfuscated_code = true;
-        result.obfuscationScore = Math.max(result.obfuscationScore, obfuscationAnalysis.confidence * 100);
+        result.obfuscationScore = Math.max(result.obfuscationScore, deobfuscationResult.confidence * 100);
+        
+        // Add deobfuscation findings
+        result.suspiciousPatterns.push({
+          type: 'obfuscation',
+          file: filePath,
+          line: 0,
+          snippet: deobfuscationResult.originalContent.substring(0, 100),
+          severity: deobfuscationResult.confidence > 0.7 ? 'high' : 'medium',
+          description: `Encoded content detected: ${deobfuscationResult.encodingTypes.join(', ')}`,
+          confidence: deobfuscationResult.confidence
+        });
+
+        // Add suspicious strings found in deobfuscated content
+        for (const suspiciousString of deobfuscationResult.suspiciousStrings) {
+          result.suspiciousPatterns.push({
+            type: 'obfuscation',
+            file: filePath,
+            line: 0,
+            snippet: suspiciousString.substring(0, 100),
+            severity: 'high',
+            description: 'Suspicious content found in deobfuscated string',
+            confidence: 0.9
+          });
+        }
+
+        // If we have deobfuscated content, analyze it for additional patterns
+        if (deobfuscationResult.deobfuscatedContent !== deobfuscationResult.originalContent) {
+          await this.analyzeFilePatterns(filePath + ' (deobfuscated)', deobfuscationResult.deobfuscatedContent, result);
+        }
+      }
+
+      // Legacy obfuscation analysis (for patterns not caught by new engine)
+      const legacyObfuscationAnalysis = this.analyzeObfuscation(content);
+      if (legacyObfuscationAnalysis.isObfuscated && deobfuscationResult.confidence < 0.3) {
+        result.riskIndicators.has_obfuscated_code = true;
+        result.obfuscationScore = Math.max(result.obfuscationScore, legacyObfuscationAnalysis.confidence * 100);
         
         result.suspiciousPatterns.push({
           type: 'obfuscation',
@@ -290,8 +329,8 @@ export class EnhancedStaticAnalyzer {
           line: 0,
           snippet: content.substring(0, 100),
           severity: 'high',
-          description: `Obfuscated code detected (${obfuscationAnalysis.techniques.join(', ')})`,
-          confidence: obfuscationAnalysis.confidence
+          description: `Obfuscated code detected (${legacyObfuscationAnalysis.techniques.join(', ')})`,
+          confidence: legacyObfuscationAnalysis.confidence
         });
       }
     }
@@ -344,6 +383,7 @@ export class EnhancedStaticAnalyzer {
     content: string, 
     result: StaticAnalysisResult
   ): Promise<void> {
+    // Analyze suspicious patterns
     for (const { pattern, type, severity, description } of this.suspiciousPatterns) {
       const matches = Array.from(content.matchAll(pattern));
       for (const match of matches) {
@@ -362,6 +402,82 @@ export class EnhancedStaticAnalyzer {
 
         // Update risk indicators
         this.updateRiskIndicators(type, result.riskIndicators);
+      }
+    }
+
+    // Enhanced string analysis for JavaScript files
+    if (this.isJavaScriptFile(filePath)) {
+      await this.analyzeStringLiterals(filePath, content, result);
+    }
+  }
+
+  /**
+   * Analyze string literals for suspicious content and obfuscation
+   */
+  private async analyzeStringLiterals(
+    filePath: string,
+    content: string,
+    result: StaticAnalysisResult
+  ): Promise<void> {
+    const stringLiterals = StringAnalyzer.extractStringLiterals(content);
+    
+    for (const literal of stringLiterals) {
+      const analysis = StringAnalyzer.analyzeString(literal);
+      
+      // Check for high entropy (potential obfuscation)
+      if (analysis.entropy > 6) {
+        result.suspiciousPatterns.push({
+          type: 'obfuscation',
+          file: filePath,
+          line: 0,
+          snippet: literal.substring(0, 50),
+          severity: 'medium',
+          description: `High entropy string (${analysis.entropy.toFixed(2)}) suggests obfuscation`,
+          confidence: Math.min(0.9, analysis.entropy / 8)
+        });
+      }
+
+      // Check for encoded content in strings
+      if (analysis.hasEncodedContent) {
+        result.riskIndicators.has_base64_strings = true;
+        result.suspiciousPatterns.push({
+          type: 'obfuscation',
+          file: filePath,
+          line: 0,
+          snippet: literal.substring(0, 50),
+          severity: 'medium',
+          description: 'String contains encoded content',
+          confidence: 0.7
+        });
+      }
+
+      // Check for suspicious patterns in strings
+      if (analysis.suspiciousPatterns.length > 0) {
+        result.suspiciousPatterns.push({
+          type: 'obfuscation',
+          file: filePath,
+          line: 0,
+          snippet: literal.substring(0, 50),
+          severity: 'high',
+          description: `Suspicious patterns in string: ${analysis.suspiciousPatterns.join(', ')}`,
+          confidence: 0.8
+        });
+      }
+
+      // High obfuscation score
+      if (analysis.obfuscationScore > 0.6) {
+        result.riskIndicators.has_obfuscated_code = true;
+        result.obfuscationScore = Math.max(result.obfuscationScore, analysis.obfuscationScore * 100);
+        
+        result.suspiciousPatterns.push({
+          type: 'obfuscation',
+          file: filePath,
+          line: 0,
+          snippet: literal.substring(0, 50),
+          severity: 'high',
+          description: `Highly obfuscated string (score: ${(analysis.obfuscationScore * 100).toFixed(0)})`,
+          confidence: analysis.obfuscationScore
+        });
       }
     }
   }
