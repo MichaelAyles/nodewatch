@@ -8,13 +8,22 @@ NodeWatch is a comprehensive system for evaluating npm packages for malware dete
 
 ## Architecture
 
-The system follows a multi-stage pipeline architecture:
+The system follows a **persistent backend service architecture** with clear separation of concerns:
 
-1. **Ingestion Pipeline**: Fetches packages from npm registry, extracts tarballs, and stores content with SHA-256 based deduplication
-2. **Static Analysis Stage**: Fast filtering using Semgrep rules, pattern matching, and heuristic analysis
-3. **Dynamic Analysis Stage**: Sandbox execution in containerized environments to monitor behavior
-4. **LLM Analysis Stage**: AI-powered code review for suspicious patterns, focused only on pre-filtered suspicious code
-5. **Scoring Engine**: Combines all signals into a weighted risk score
+### Service Layers
+1. **API Gateway Layer**: Express server handles job submission and status queries (non-blocking)
+2. **Job Queue Layer**: BullMQ manages analysis jobs with Redis backend
+3. **Worker Service Layer**: Persistent background workers process analysis jobs
+4. **Analysis Pipeline**: Multi-stage analysis within worker processes
+5. **Caching Layer**: Multi-tier caching with content deduplication
+6. **Data Layer**: Convex database for real-time data storage
+
+### Analysis Pipeline (Within Workers)
+1. **Content Deduplication**: SHA-256 based caching to avoid redundant analysis
+2. **Enhanced Static Analysis**: 40+ patterns, obfuscation detection, typosquatting analysis
+3. **Dynamic Sandbox Analysis**: Docker containers monitor package behavior
+4. **LLM Analysis**: AI-powered code review for suspicious patterns (cost-optimized)
+5. **Risk Scoring**: Weighted signal combination with confidence scoring
 
 ## Key Components
 
@@ -27,30 +36,48 @@ The system follows a multi-stage pipeline architecture:
 
 ## Development Commands
 
-Once the project is initialized, typical commands will be:
+The system requires both API server and worker processes:
 
 ```bash
 # Install dependencies
 npm install
 
-# Run development server
-npm run dev
+# Development (requires 2 terminals)
+npm run dev         # Terminal 1: API server with hot reload
+npm run worker:dev  # Terminal 2: Worker service with hot reload
 
-# Run tests
-npm test
+# Production
+npm run start       # API server
+npm run worker      # Worker service (background)
 
-# Run linter
-npm run lint
+# Testing & Building
+npm test           # Run comprehensive test suite (58 tests)
+npm run build      # Compile TypeScript
 
-# Build for production
-npm run build
-
-# Database migrations
-npm run migrate
-
-# Start worker processes
-npm run worker
+# Docker (full stack)
+npm run docker:build  # Build images
+npm run docker:run    # Start API + Workers + Redis
 ```
+
+## Service Architecture
+
+### API Server (`npm run dev`)
+- **Purpose**: Job management, status queries, result retrieval
+- **Port**: 3000 (configurable)
+- **Responsibilities**: 
+  - Queue analysis jobs (non-blocking)
+  - Provide job status and progress updates
+  - Serve web interface
+  - Manage queue statistics
+
+### Worker Service (`npm run worker:dev`)  
+- **Purpose**: Background analysis processing
+- **Scaling**: Multiple workers can run in parallel
+- **Responsibilities**:
+  - Process analysis jobs from queue
+  - Execute multi-stage analysis pipeline
+  - Update job progress in real-time
+  - Store results in database and cache
 
 ## Database Schema Considerations
 

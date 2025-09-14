@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { AnalysisPipelineWithDB } from './pipeline-with-db';
+import { Queue } from 'bullmq';
 import { convexClient } from './convex-client';
 import { config } from './config';
 import { logger } from './utils/logger';
@@ -8,7 +8,11 @@ import { getRedisClient, closeRedisConnection } from './utils/redis';
 
 const app = express();
 const port = config.port;
-const pipeline = new AnalysisPipelineWithDB();
+
+// Job queue for analysis tasks
+const analysisQueue = new Queue('analysis-queue', {
+  connection: getRedisClient(),
+});
 
 app.use(cors());
 app.use(express.json());
@@ -18,9 +22,9 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() });
 });
 
-// Analyze a package
+// Queue a package for analysis (non-blocking)
 app.post('/api/analyze', async (req, res) => {
-  const { name, version } = req.body;
+  const { name, version, priority } = req.body;
   
   if (!name) {
     return res.status(400).json({ error: 'Package name is required' });
@@ -28,24 +32,121 @@ app.post('/api/analyze', async (req, res) => {
 
   try {
     logger.apiRequest('POST', '/api/analyze', req.ip);
-    logger.analysisStart(name, version || 'latest');
     
-    const startTime = Date.now();
-    const result = await pipeline.analyzePackage(name, version || 'latest');
-    const duration = Date.now() - startTime;
-    
-    logger.analysisComplete(name, version || 'latest', duration, result.overall_score);
+    // Add job to queue instead of processing directly
+    const job = await analysisQueue.add('analyze-package', {
+      packageName: name,
+      version: version || 'latest',
+      priority: priority || 1,
+      requestedBy: req.ip,
+      requestedAt: Date.now(),
+    }, {
+      priority: priority || 1,
+      removeOnComplete: 100,
+      removeOnFail: 50,
+    });
+
+    logger.queueJob(job.id!, `${name}@${version || 'latest'}`);
     
     res.json({
       success: true,
-      result
+      jobId: job.id,
+      status: 'queued',
+      message: `Analysis queued for ${name}@${version || 'latest'}`,
+      statusUrl: `/api/job/${job.id}/status`,
+      resultUrl: `/api/job/${job.id}/result`
     });
   } catch (error: any) {
-    logger.analysisError(name, version || 'latest', error);
     logger.apiError('POST', '/api/analyze', error, req.ip);
     res.status(500).json({
       success: false,
-      error: error.message || 'Analysis failed'
+      error: error.message || 'Failed to queue analysis'
+    });
+  }
+});
+
+// Get job status
+app.get('/api/job/:jobId/status', async (req, res) => {
+  const { jobId } = req.params;
+  
+  try {
+    const job = await analysisQueue.getJob(jobId);
+    
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        error: 'Job not found'
+      });
+    }
+
+    const state = await job.getState();
+    const progress = job.progress;
+    
+    res.json({
+      success: true,
+      jobId: job.id,
+      status: state,
+      progress: progress || 0,
+      data: job.data,
+      createdAt: job.timestamp,
+      processedAt: job.processedOn,
+      finishedAt: job.finishedOn,
+      failedReason: job.failedReason,
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get job result
+app.get('/api/job/:jobId/result', async (req, res) => {
+  const { jobId } = req.params;
+  
+  try {
+    const job = await analysisQueue.getJob(jobId);
+    
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        error: 'Job not found'
+      });
+    }
+
+    const state = await job.getState();
+    
+    if (state === 'completed') {
+      res.json({
+        success: true,
+        jobId: job.id,
+        status: 'completed',
+        result: job.returnvalue,
+        completedAt: job.finishedOn,
+        processingTime: job.finishedOn! - job.processedOn!,
+      });
+    } else if (state === 'failed') {
+      res.status(500).json({
+        success: false,
+        jobId: job.id,
+        status: 'failed',
+        error: job.failedReason,
+        failedAt: job.finishedOn,
+      });
+    } else {
+      res.json({
+        success: true,
+        jobId: job.id,
+        status: state,
+        progress: job.progress || 0,
+        message: 'Analysis still in progress'
+      });
+    }
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });
@@ -86,6 +187,77 @@ app.get('/api/packages/recent', async (req, res) => {
     res.json({
       success: true,
       packages
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get queue statistics
+app.get('/api/queue/stats', async (req, res) => {
+  try {
+    const waiting = await analysisQueue.getWaiting();
+    const active = await analysisQueue.getActive();
+    const completed = await analysisQueue.getCompleted();
+    const failed = await analysisQueue.getFailed();
+    
+    res.json({
+      success: true,
+      stats: {
+        waiting: waiting.length,
+        active: active.length,
+        completed: completed.length,
+        failed: failed.length,
+        total: waiting.length + active.length + completed.length + failed.length
+      }
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// List active jobs
+app.get('/api/queue/jobs', async (req, res) => {
+  try {
+    const { status = 'active', limit = 10 } = req.query;
+    
+    let jobs;
+    switch (status) {
+      case 'waiting':
+        jobs = await analysisQueue.getWaiting(0, parseInt(limit as string) - 1);
+        break;
+      case 'active':
+        jobs = await analysisQueue.getActive(0, parseInt(limit as string) - 1);
+        break;
+      case 'completed':
+        jobs = await analysisQueue.getCompleted(0, parseInt(limit as string) - 1);
+        break;
+      case 'failed':
+        jobs = await analysisQueue.getFailed(0, parseInt(limit as string) - 1);
+        break;
+      default:
+        jobs = await analysisQueue.getActive(0, parseInt(limit as string) - 1);
+    }
+    
+    const jobData = await Promise.all(jobs.map(async (job) => ({
+      id: job.id,
+      data: job.data,
+      progress: job.progress,
+      state: await job.getState(),
+      createdAt: job.timestamp,
+      processedAt: job.processedOn,
+      finishedAt: job.finishedOn,
+    })));
+    
+    res.json({
+      success: true,
+      jobs: jobData
     });
   } catch (error: any) {
     res.status(500).json({
@@ -167,6 +339,9 @@ app.get('/', (req, res) => {
       </div>
 
       <script>
+        let currentJobId = null;
+        let pollInterval = null;
+        
         async function analyzePackage() {
           const packageName = document.getElementById('packageName').value;
           const version = document.getElementById('version').value;
@@ -177,9 +352,15 @@ app.get('/', (req, res) => {
             return;
           }
           
-          resultsDiv.innerHTML = '<span class="loading">Analyzing ' + packageName + '...</span>';
+          // Clear any existing polling
+          if (pollInterval) {
+            clearInterval(pollInterval);
+          }
+          
+          resultsDiv.innerHTML = '<span class="loading">Queuing analysis for ' + packageName + '...</span>';
           
           try {
+            // Submit job to queue
             const response = await fetch('/api/analyze', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -189,23 +370,90 @@ app.get('/', (req, res) => {
             const data = await response.json();
             
             if (data.success) {
-              const result = data.result;
-              const riskClass = result.risk_level;
-              
+              currentJobId = data.jobId;
               resultsDiv.innerHTML = 
-                '<h3>Analysis Results</h3>' +
-                '<strong>Package:</strong> ' + result.package.name + '@' + result.package.version + '\\n' +
-                '<strong>Risk Level:</strong> <span class="' + riskClass + '">' + result.risk_level.toUpperCase() + '</span>\\n' +
-                '<strong>Score:</strong> ' + result.overall_score + '/100\\n\\n' +
-                '<strong>Static Analysis:</strong>\\n' +
-                JSON.stringify(result.static_analysis, null, 2) + '\\n\\n' +
-                '<strong>AI Analysis:</strong>\\n' +
-                JSON.stringify(result.llm_analysis, null, 2);
+                '<h3>Analysis Queued</h3>' +
+                '<strong>Job ID:</strong> ' + data.jobId + '\\n' +
+                '<strong>Status:</strong> <span class="loading">Queued</span>\\n' +
+                '<strong>Progress:</strong> <span id="progress">0%</span>\\n\\n' +
+                '<div id="progressBar" style="width: 100%; background: #f0f0f0; border-radius: 5px;">' +
+                '<div id="progressFill" style="width: 0%; background: #007bff; height: 20px; border-radius: 5px; transition: width 0.3s;"></div>' +
+                '</div>';
+              
+              // Start polling for status
+              pollJobStatus(data.jobId);
             } else {
               resultsDiv.innerHTML = '<span class="error">Error: ' + data.error + '</span>';
             }
           } catch (error) {
             resultsDiv.innerHTML = '<span class="error">Error: ' + error.message + '</span>';
+          }
+        }
+        
+        async function pollJobStatus(jobId) {
+          pollInterval = setInterval(async () => {
+            try {
+              const statusResponse = await fetch('/api/job/' + jobId + '/status');
+              const statusData = await statusResponse.json();
+              
+              if (statusData.success) {
+                const progress = statusData.progress || 0;
+                const status = statusData.status;
+                
+                // Update progress display
+                document.getElementById('progress').textContent = progress + '%';
+                document.getElementById('progressFill').style.width = progress + '%';
+                
+                if (status === 'completed') {
+                  clearInterval(pollInterval);
+                  await fetchJobResult(jobId);
+                } else if (status === 'failed') {
+                  clearInterval(pollInterval);
+                  document.getElementById('results').innerHTML = 
+                    '<span class="error">Analysis failed: ' + (statusData.failedReason || 'Unknown error') + '</span>';
+                } else {
+                  // Update status text
+                  const statusElement = document.querySelector('#results .loading');
+                  if (statusElement) {
+                    statusElement.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+                    statusElement.className = status === 'active' ? 'loading' : 'info';
+                  }
+                }
+              }
+            } catch (error) {
+              console.error('Error polling job status:', error);
+            }
+          }, 1000); // Poll every second
+        }
+        
+        async function fetchJobResult(jobId) {
+          try {
+            const resultResponse = await fetch('/api/job/' + jobId + '/result');
+            const resultData = await resultResponse.json();
+            
+            if (resultData.success && resultData.result) {
+              const result = resultData.result;
+              const riskClass = result.risk_level || 'unknown';
+              
+              document.getElementById('results').innerHTML = 
+                '<h3>Analysis Complete</h3>' +
+                '<strong>Job ID:</strong> ' + jobId + '\\n' +
+                '<strong>Package:</strong> ' + (result.metadata?.name || 'Unknown') + '@' + (result.metadata?.version || 'Unknown') + '\\n' +
+                '<strong>Risk Level:</strong> <span class="' + riskClass + '">' + (result.riskLevel || 'UNKNOWN').toUpperCase() + '</span>\\n' +
+                '<strong>Score:</strong> ' + (result.overallScore || 0) + '/100\\n' +
+                '<strong>Processing Time:</strong> ' + (resultData.processingTime || 0) + 'ms\\n' +
+                '<strong>Cache Hit:</strong> ' + (result.cacheHit ? 'Yes' : 'No') + '\\n\\n' +
+                '<strong>Static Analysis:</strong>\\n' +
+                JSON.stringify(result.stages?.static || {}, null, 2) + '\\n\\n' +
+                '<strong>AI Analysis:</strong>\\n' +
+                JSON.stringify(result.stages?.llm || {}, null, 2);
+            } else {
+              document.getElementById('results').innerHTML = 
+                '<span class="error">Error fetching results: ' + (resultData.error || 'Unknown error') + '</span>';
+            }
+          } catch (error) {
+            document.getElementById('results').innerHTML = 
+              '<span class="error">Error fetching results: ' + error.message + '</span>';
           }
         }
       </script>
