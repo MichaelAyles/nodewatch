@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 
-// Load environment variables
+// Load environment variables from .env.local and .env files
+dotenv.config({ path: '.env.local' });
 dotenv.config();
 
 export interface Config {
@@ -71,10 +72,10 @@ export interface Config {
 
 function getEnvVar(name: string, defaultValue?: string): string {
   const value = process.env[name];
-  if (!value && !defaultValue) {
+  if (!value && defaultValue === undefined) {
     throw new Error(`Environment variable ${name} is required`);
   }
-  return value || defaultValue!;
+  return value || defaultValue || '';
 }
 
 function getEnvNumber(name: string, defaultValue: number): number {
@@ -93,14 +94,16 @@ function getEnvBoolean(name: string, defaultValue: boolean): boolean {
   return value.toLowerCase() === 'true';
 }
 
+const nodeEnv = getEnvVar('NODE_ENV', 'development');
+
 export const config: Config = {
   port: getEnvNumber('PORT', 3000),
-  nodeEnv: getEnvVar('NODE_ENV', 'development'),
+  nodeEnv,
   logLevel: getEnvVar('LOG_LEVEL', 'info'),
 
   convex: {
-    url: getEnvVar('CONVEX_URL'),
-    deployment: getEnvVar('CONVEX_DEPLOYMENT'),
+    url: getEnvVar('CONVEX_URL', nodeEnv === 'test' ? 'test-convex-url' : ''),
+    deployment: getEnvVar('CONVEX_DEPLOYMENT', nodeEnv === 'test' ? 'test-deployment' : ''),
   },
 
   redis: {
@@ -155,12 +158,15 @@ export const config: Config = {
 export function validateConfig(): void {
   const errors: string[] = [];
 
-  if (!config.convex.url) {
-    errors.push('CONVEX_URL is required');
-  }
+  // Only validate Convex in non-test environments
+  if (config.nodeEnv !== 'test') {
+    if (!config.convex.url) {
+      errors.push('CONVEX_URL is required');
+    }
 
-  if (!config.convex.deployment) {
-    errors.push('CONVEX_DEPLOYMENT is required');
+    if (!config.convex.deployment) {
+      errors.push('CONVEX_DEPLOYMENT is required');
+    }
   }
 
   if (config.nodeEnv === 'production') {
