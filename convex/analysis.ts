@@ -7,6 +7,9 @@ export const saveAnalysisResult = mutation({
     stage: v.string(),
     results: v.any(),
     error: v.optional(v.string()),
+    processing_time_ms: v.optional(v.number()),
+    cache_hit: v.optional(v.boolean()),
+    content_hash: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const existing = await ctx.db
@@ -15,12 +18,18 @@ export const saveAnalysisResult = mutation({
       .filter((q) => q.eq(q.field("stage"), args.stage))
       .first();
 
+    const now = Date.now();
+    const processingTime = args.processing_time_ms || 0;
+
     if (existing) {
       await ctx.db.patch(existing._id, {
         status: args.error ? "failed" : "completed",
         results: args.results,
         error: args.error,
-        completed_at: Date.now(),
+        completed_at: now,
+        processing_time_ms: processingTime,
+        cache_hit: args.cache_hit || false,
+        content_hash: args.content_hash,
       });
       return existing._id;
     }
@@ -31,8 +40,11 @@ export const saveAnalysisResult = mutation({
       status: args.error ? "failed" : "completed",
       results: args.results,
       error: args.error,
-      started_at: Date.now(),
-      completed_at: Date.now(),
+      started_at: now - processingTime,
+      completed_at: now,
+      processing_time_ms: processingTime,
+      cache_hit: args.cache_hit || false,
+      content_hash: args.content_hash,
     });
   },
 });
@@ -44,7 +56,15 @@ export const saveRiskScore = mutation({
     static_score: v.optional(v.number()),
     dynamic_score: v.optional(v.number()),
     llm_score: v.optional(v.number()),
+    risk_signals: v.optional(v.array(v.object({
+      type: v.string(),
+      severity: v.string(),
+      confidence: v.number(),
+      description: v.string(),
+    }))),
     reasons: v.array(v.string()),
+    scoring_version: v.optional(v.string()),
+    calculation_time_ms: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const existing = await ctx.db
@@ -52,18 +72,26 @@ export const saveRiskScore = mutation({
       .withIndex("by_package", (q) => q.eq("package_id", args.package_id))
       .first();
 
+    const now = Date.now();
+    const data = {
+      package_id: args.package_id,
+      overall_score: args.overall_score,
+      static_score: args.static_score,
+      dynamic_score: args.dynamic_score,
+      llm_score: args.llm_score,
+      risk_signals: args.risk_signals || [],
+      reasons: args.reasons,
+      scoring_version: args.scoring_version || "1.0",
+      calculated_at: now,
+      calculation_time_ms: args.calculation_time_ms || 0,
+    };
+
     if (existing) {
-      await ctx.db.patch(existing._id, {
-        ...args,
-        calculated_at: Date.now(),
-      });
+      await ctx.db.patch(existing._id, data);
       return existing._id;
     }
 
-    return await ctx.db.insert("risk_scores", {
-      ...args,
-      calculated_at: Date.now(),
-    });
+    return await ctx.db.insert("risk_scores", data);
   },
 });
 
