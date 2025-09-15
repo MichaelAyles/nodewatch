@@ -33,19 +33,126 @@ async function runCommand(command, args = [], options = {}) {
   });
 }
 
-async function checkDocker() {
+async function checkAndSetupDocker() {
+  console.log('🐳 Checking Docker availability...');
+  
   try {
+    // Check if Docker is installed
     await runCommand('docker', ['--version'], { silent: true });
+    console.log('✅ Docker is installed');
     
     // Check if Docker daemon is running
-    await runCommand('docker', ['ps'], { silent: true });
-    
-    return true;
+    try {
+      await runCommand('docker', ['ps'], { silent: true });
+      console.log('✅ Docker daemon is running');
+      return { available: true, running: true };
+    } catch (error) {
+      console.log('⚠️  Docker daemon is not running');
+      
+      // Try to start Docker on macOS
+      if (process.platform === 'darwin') {
+        console.log('🚀 Attempting to start Docker Desktop...');
+        try {
+          await runCommand('open', ['-a', 'Docker'], { silent: true });
+          console.log('⏳ Waiting for Docker to start...');
+          
+          // Wait up to 60 seconds for Docker to start
+          for (let i = 0; i < 60; i++) {
+            try {
+              await runCommand('docker', ['ps'], { silent: true });
+              console.log('✅ Docker started successfully!');
+              return { available: true, running: true };
+            } catch (e) {
+              process.stdout.write('.');
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+          }
+          console.log('\n⚠️  Docker took too long to start');
+        } catch (error) {
+          console.log('❌ Failed to start Docker Desktop automatically');
+        }
+      }
+      
+      return { available: true, running: false };
+    }
   } catch (error) {
-    console.error('❌ Docker is not running or not accessible');
-    console.error('💡 Please start Docker Desktop or Docker daemon');
-    console.error('   On macOS: Open Docker Desktop application');
-    console.error('   On Linux: sudo systemctl start docker');
+    console.log('❌ Docker is not installed');
+    return { available: false, running: false };
+  }
+}
+
+async function checkAndSetupRedis() {
+  console.log('📊 Checking Redis availability...');
+  
+  return new Promise((resolve) => {
+    const { exec } = require('child_process');
+    exec('redis-cli ping', (error, stdout) => {
+      if (!error && stdout.trim() === 'PONG') {
+        console.log('✅ Redis is running locally');
+        resolve({ available: true, local: true });
+      } else {
+        console.log('⚠️  Redis is not running locally');
+        
+        // Check if Redis is installed
+        exec('which redis-server', (error) => {
+          if (!error) {
+            console.log('✅ Redis is installed, attempting to start...');
+            
+            // Try to start Redis
+            if (process.platform === 'darwin') {
+              exec('brew services start redis', (error) => {
+                if (!error) {
+                  console.log('✅ Redis started with Homebrew');
+                  resolve({ available: true, local: true });
+                } else {
+                  console.log('⚠️  Failed to start Redis with Homebrew');
+                  resolve({ available: true, local: false });
+                }
+              });
+            } else {
+              resolve({ available: true, local: false });
+            }
+          } else {
+            console.log('❌ Redis is not installed');
+            resolve({ available: false, local: false });
+          }
+        });
+      }
+    });
+  });
+}
+
+async function installRedis() {
+  console.log('📦 Installing Redis...');
+  
+  if (process.platform === 'darwin') {
+    try {
+      console.log('🍺 Installing Redis with Homebrew...');
+      await runCommand('brew', ['install', 'redis']);
+      await runCommand('brew', ['services', 'start', 'redis']);
+      console.log('✅ Redis installed and started');
+      return true;
+    } catch (error) {
+      console.log('❌ Failed to install Redis with Homebrew');
+      console.log('💡 Please install Homebrew first: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"');
+      return false;
+    }
+  } else if (process.platform === 'linux') {
+    try {
+      console.log('🐧 Installing Redis with apt...');
+      await runCommand('sudo', ['apt', 'update']);
+      await runCommand('sudo', ['apt', 'install', '-y', 'redis-server']);
+      await runCommand('sudo', ['systemctl', 'start', 'redis']);
+      await runCommand('sudo', ['systemctl', 'enable', 'redis']);
+      console.log('✅ Redis installed and started');
+      return true;
+    } catch (error) {
+      console.log('❌ Failed to install Redis with apt');
+      return false;
+    }
+  } else {
+    console.log('❌ Automatic Redis installation not supported on this platform');
+    console.log('💡 Please install Redis manually: https://redis.io/download');
     return false;
   }
 }
@@ -203,13 +310,50 @@ async function buildProject() {
 
 async function main() {
   try {
-    console.log('🚀 NodeWatch Complete Setup & Launch\n');
+    console.log('🚀 NodeWatch Complete Setup & Launch');
+    console.log('   This script will install and configure EVERYTHING needed!\n');
     
-    // Step 1: Check prerequisites
-    console.log('1️⃣ Checking system prerequisites...');
-    if (!(await checkDocker())) {
-      console.log('\n💡 Alternative: Try "npm run dev:no-docker" if you have Redis installed locally');
-      process.exit(1);
+    let useDocker = false;
+    let redisMethod = '';
+    
+    // Step 1: Check and setup Docker/Redis
+    console.log('1️⃣ Setting up Redis (required for job queue)...');
+    
+    const dockerStatus = await checkAndSetupDocker();
+    
+    if (dockerStatus.running) {
+      console.log('✅ Using Docker for Redis');
+      useDocker = true;
+      redisMethod = 'Docker container';
+    } else {
+      console.log('🔄 Docker not available, checking local Redis...');
+      
+      const redisStatus = await checkAndSetupRedis();
+      
+      if (redisStatus.available && redisStatus.local) {
+        console.log('✅ Using local Redis installation');
+        useDocker = false;
+        redisMethod = 'Local installation';
+      } else if (redisStatus.available && !redisStatus.local) {
+        console.log('⚠️  Redis installed but not running, trying to start...');
+        // Redis setup function already tries to start it
+        useDocker = false;
+        redisMethod = 'Local installation';
+      } else {
+        console.log('📦 Redis not found, installing automatically...');
+        if (await installRedis()) {
+          useDocker = false;
+          redisMethod = 'Local installation (auto-installed)';
+        } else {
+          console.log('❌ Could not setup Redis automatically');
+          console.log('\n🔧 Manual setup required:');
+          console.log('   Option 1: Install Docker Desktop and restart this script');
+          console.log('   Option 2: Install Redis manually:');
+          console.log('     macOS: brew install redis && brew services start redis');
+          console.log('     Linux: sudo apt install redis-server && sudo systemctl start redis');
+          process.exit(1);
+        }
+      }
     }
     
     // Step 2: Install/update dependencies
@@ -235,8 +379,25 @@ async function main() {
     // Step 5: Start services
     console.log('\n5️⃣ Starting services...');
     
-    if (!(await startRedis())) {
-      process.exit(1);
+    if (useDocker) {
+      if (!(await startRedis())) {
+        process.exit(1);
+      }
+    } else {
+      console.log('📊 Using existing Redis installation...');
+      // Verify Redis is still running
+      const { exec } = require('child_process');
+      const redisCheck = await new Promise((resolve) => {
+        exec('redis-cli ping', (error, stdout) => {
+          resolve(!error && stdout.trim() === 'PONG');
+        });
+      });
+      
+      if (!redisCheck) {
+        console.log('❌ Redis is not responding');
+        process.exit(1);
+      }
+      console.log('✅ Redis is ready');
     }
     
     await startConvex();
@@ -250,7 +411,7 @@ async function main() {
     console.log('│  👤 Login: admin / nodewatch-admin-2024  │');
     console.log('└─────────────────────────────────────────┘');
     console.log('\n📊 Service Status:');
-    console.log('   ✅ Redis (Docker container)');
+    console.log(`   ✅ Redis (${redisMethod})`);
     console.log('   ✅ Convex (Database)');
     console.log('   ✅ API Server (Port 3000)');
     console.log('   ✅ Analysis Worker');
@@ -261,9 +422,9 @@ async function main() {
   } catch (error) {
     console.error('❌ Failed to start NodeWatch:', error.message);
     console.log('\n🔧 Troubleshooting:');
-    console.log('   • Check Docker is running: docker ps');
-    console.log('   • Check system: npm run dev:check');
-    console.log('   • Try alternative: npm run dev:no-docker');
+    console.log('   • Run diagnostics: npm run dev:check');
+    console.log('   • Check logs: ls -la logs/');
+    console.log('   • Manual setup: see README.md');
     process.exit(1);
   }
 }

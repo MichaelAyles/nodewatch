@@ -132,12 +132,15 @@ npm run dev:all
    - **Admin Dashboard**: http://localhost:3000/admin
    - **Login**: admin / nodewatch-admin-2024
 
-That's it! 🎉 The script automatically:
-- ✅ Installs/updates all dependencies
-- ✅ Checks Convex configuration
-- ✅ Starts Redis (Docker container)
-- ✅ Launches all services (Convex, API, Worker)
-- ✅ Provides complete status and access information
+That's it! 🎉 The script automatically handles EVERYTHING:
+- ✅ **Installs/updates all dependencies** (npm install)
+- ✅ **Sets up Redis** (Docker container OR installs locally if Docker unavailable)
+- ✅ **Checks Convex configuration** (guides you through setup if needed)
+- ✅ **Builds the project** (compiles TypeScript)
+- ✅ **Launches all services** (Convex, API, Worker)
+- ✅ **Provides complete status dashboard** with access URLs
+
+**No manual setup required** - the script detects your system and installs what's missing!
 
 ## Usage
 

@@ -38,15 +38,16 @@ npm run dev:stop
 ## Available Scripts
 
 ### `npm run dev:all` (Recommended)
-- **Best for**: Complete automated setup
+- **Best for**: Complete zero-config setup
 - **What it does**: 
   - ✅ Installs/updates all npm dependencies
-  - ✅ Checks Convex configuration
+  - ✅ **Auto-installs Redis** (Docker OR local installation)
+  - ✅ **Auto-starts Docker** (on macOS if available)
+  - ✅ Checks Convex configuration (guides setup if needed)
   - ✅ Builds project (if needed)
-  - ✅ Starts Redis in Docker container
   - ✅ Launches all services (Convex, API, Worker)
   - ✅ Provides complete status dashboard
-- **Requirements**: Docker running
+- **Requirements**: **NONE** - installs everything automatically
 - **Logs**: Services run in background, check logs/ directory
 - **Stop**: `npm run dev:stop`
 
