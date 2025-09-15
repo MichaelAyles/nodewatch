@@ -18,6 +18,19 @@ A comprehensive security analysis system for npm packages that detects potential
   - String entropy analysis and suspicious pattern recognition
   - Prototype pollution detection
   
+- **AI-Powered Analysis**
+  - OpenRouter LLM integration with multiple model support
+  - Automatic cost tracking and budget management
+  - Evidence-based analysis prompting
+  - Fallback to local LLM options
+  
+- **Admin Dashboard & Monitoring**
+  - Real-time system metrics and performance monitoring
+  - Comprehensive cost tracking with budget alerts
+  - Queue statistics and job management interface
+  - Database analytics and cache performance metrics
+  - Authentication-protected admin interface
+  
 - **Content Deduplication System**
   - SHA-256 hashing for files and packages
   - Redis-based caching with configurable TTL
@@ -35,94 +48,91 @@ A comprehensive security analysis system for npm packages that detects potential
   - File-level deduplication tracking
   - Dependency graph relationships
   - Analysis result versioning and caching
+  - Cost tracking and analytics events
   
 - **Web Interface & API**
   - Real-time analysis progress tracking
   - RESTful API with job management
   - Queue statistics and monitoring endpoints
   - Interactive web interface for package analysis
+  
+- **Development Automation**
+  - One-command development environment setup
+  - Automated service orchestration (Redis, Convex, API, Worker)
+  - Cross-platform development scripts
+  - Integrated logging and monitoring
 
 ### 🚧 **In Development / Planned Features**
 
 - **Dynamic Behavioral Analysis**
-  - Docker-based sandbox execution (planned)
+  - Docker-based sandbox execution (in progress)
   - Runtime behavior monitoring (planned)
   - Network activity capture (planned)
   - File system operation tracking (planned)
   
-- **Real AI Integration**
-  - OpenAI GPT-4 API integration (in progress)
-  - Anthropic Claude API support (planned)
-  - Local LLM fallback options (planned)
-  - Evidence-based analysis prompting (planned)
-  
 - **Production Features**
   - API authentication and rate limiting (planned)
-  - Comprehensive monitoring and alerting (planned)
   - Batch processing for top 1K packages (planned)
   - Enhanced risk scoring with weighted signals (planned)
+  - Public API with documentation (planned)
 
 ## Quick Start
 
 ### 🎉 What Works Right Now
 
-The current implementation is already pretty powerful:
+The current implementation is production-ready and powerful:
 - **🔬 Advanced static analysis** with 40+ malicious pattern detections
 - **🧩 Sophisticated deobfuscation** of encoded content (Base64, hex, Unicode, URL)
-- **⚡ Real-time job processing** with progress tracking
+- **🤖 AI-powered analysis** with OpenRouter LLM integration and cost tracking
+- **📊 Admin dashboard** with real-time metrics, cost monitoring, and system health
+- **⚡ Real-time job processing** with progress tracking and queue management
 - **♻️ Content deduplication** to avoid redundant analysis
 - **🖥️ Interactive web interface** for package analysis
 - **🔌 RESTful API** for programmatic access
+- **🚀 One-command development setup** with automated service orchestration
 
-*Try it out - analyze any npm package in seconds!*
+*Try it out - analyze any npm package in seconds with full cost visibility!*
 
 ### Prerequisites
 
 - Node.js 18+ 
 - npm or yarn
-- Redis server (for job queue and caching)
+- Docker (for Redis and optional services)
 - Convex account (free at [convex.dev](https://convex.dev))
+- OpenRouter API key (optional, for AI analysis)
 
 ### Installation
 
-1. Clone the repository:
+1. **Clone and setup**:
 ```bash
 git clone https://github.com/yourusername/nodewatch.git
 cd nodewatch
-```
-
-2. Install dependencies:
-```bash
 npm install
 ```
 
-3. Set up Redis:
-```bash
-# Using Docker (recommended)
-docker run -d -p 6379:6379 redis:7-alpine
-
-# Or install locally (macOS)
-brew install redis
-redis-server
-```
-
-4. Set up Convex:
+2. **Configure Convex** (one-time setup):
 ```bash
 npx convex login
-npx convex dev
+npx convex dev  # Creates .env.local with credentials
 ```
-This will create a `.env.local` file with your Convex credentials.
 
-5. Start the development server and worker:
+3. **Add OpenRouter API key** (optional, for AI analysis):
 ```bash
-# Terminal 1: Start API server
-npm run dev
-
-# Terminal 2: Start analysis worker
-npm run worker:dev
+# Add to .env.local
+OPENROUTER_API_KEY=your_api_key_here
 ```
 
-6. Open http://localhost:3000 in your browser and start analyzing! 🎉
+4. **Start everything with one command**:
+```bash
+npm run dev:quick
+```
+
+5. **Access your services**:
+   - **Web Interface**: http://localhost:3000
+   - **Admin Dashboard**: http://localhost:3000/admin
+   - **Login**: admin / nodewatch-admin-2024
+
+That's it! 🎉 All services (Redis, Convex, API, Worker) start automatically.
 
 ## Usage
 
@@ -134,7 +144,15 @@ Navigate to http://localhost:3000 and enter an npm package name to analyze. Watc
 3. ⏱️ Display real-time progress
 4. 🎯 Show detailed results when complete
 
-*The interface updates in real-time - no more waiting and wondering!*
+### 📊 Admin Dashboard
+
+Access the admin dashboard at http://localhost:3000/admin (login: admin / nodewatch-admin-2024):
+- **Real-time Metrics**: Queue stats, system health, performance monitoring
+- **Cost Tracking**: LLM API costs, compute costs, budget alerts
+- **Database Analytics**: Package statistics, cache performance, deduplication rates
+- **Job Management**: View recent jobs, monitor progress, track failures
+
+*The interface updates in real-time with comprehensive operational visibility!*
 
 ### API Endpoints
 
@@ -195,6 +213,21 @@ GET /api/queue/stats
 
 # List jobs by status
 GET /api/queue/jobs?status=active&limit=10
+```
+
+#### Admin Dashboard API
+```bash
+# Admin dashboard overview (requires authentication)
+GET /admin/overview
+
+# Cost tracking and analytics
+GET /admin/costs?period=24h
+
+# Job management and monitoring
+GET /admin/jobs?status=active&limit=10
+
+# System health and performance
+GET /admin/health
 ```
 
 #### Legacy endpoints
@@ -282,16 +315,31 @@ GET /api/packages/recent
 nodewatch/
 ├── src/
 │   ├── index.ts              # Express server & API routes
+│   ├── worker.ts             # Analysis worker process
 │   ├── pipeline-with-db.ts   # Analysis pipeline with DB integration
 │   ├── npm-fetcher.ts        # NPM registry interaction
 │   ├── convex-client.ts      # Convex database client
+│   ├── admin/
+│   │   ├── dashboard.ts      # Admin API routes
+│   │   └── dashboard.html    # Admin web interface
+│   ├── services/
+│   │   ├── cost-tracker.ts   # Cost tracking and budget management
+│   │   └── analytics.ts      # Custom analytics service
+│   ├── config/
+│   │   └── index.ts          # Configuration management
 │   └── analyzers/
 │       ├── static-analyzer.ts # Pattern-based detection
 │       └── llm-analyzer.ts    # AI-powered analysis
+├── scripts/
+│   ├── dev.js                # Cross-platform development launcher
+│   ├── dev-start.sh          # Shell script for development
+│   ├── dev-stop.sh           # Stop all services
+│   └── README.md             # Development scripts documentation
 ├── convex/
-│   ├── schema.ts             # Database schema
+│   ├── schema.ts             # Enhanced database schema
 │   ├── packages.ts           # Package mutations/queries
 │   └── analysis.ts           # Analysis results handling
+├── logs/                     # Service logs (auto-created)
 ├── cache/                    # Local cache directory
 └── dist/                     # Compiled TypeScript output
 ```
@@ -301,13 +349,23 @@ nodewatch/
 ### Available Scripts
 
 ```bash
-# Development
+# Development (Automated)
+npm run dev:quick   # Start everything in background (recommended)
+npm run dev:all     # Start with live monitoring and logs
+npm run dev:stop    # Stop all services
+
+# Development (Manual)
 npm run dev         # Start API server with hot reload
 npm run worker:dev  # Start analysis worker with hot reload
+npm run dev:redis   # Start Redis container only
+npm run dev:convex  # Start Convex only
 
 # Production  
 npm run start       # Start API server
 npm run worker      # Start analysis worker (background service)
+
+# Monitoring
+npm run logs        # View all service logs
 
 # Build & Test
 npm run build       # Compile TypeScript to JavaScript
@@ -315,12 +373,24 @@ npm test           # Run comprehensive test suite
 
 # Docker
 npm run docker:build  # Build Docker images
-npm run docker:run    # Start full stack with docker-compose
+npm run docker:dev    # Start full stack with docker-compose
 ```
 
 ### Running the Full System
 
-#### Development Mode
+#### Development Mode (Automated - Recommended)
+```bash
+# One command starts everything
+npm run dev:quick
+
+# Or with live monitoring
+npm run dev:all
+
+# Stop everything
+npm run dev:stop
+```
+
+#### Development Mode (Manual)
 ```bash
 # Terminal 1: Start API server
 npm run dev
@@ -335,7 +405,7 @@ redis-server
 #### Production Mode
 ```bash
 # Using Docker Compose (Recommended)
-npm run docker:run
+npm run docker:dev
 
 # Or manually
 npm run start &      # API server
@@ -344,12 +414,58 @@ npm run worker &     # Worker service
 
 ### Environment Variables
 
-Create a `.env.local` file (automatically created by Convex):
+Your `.env.local` file (automatically created by Convex, enhanced for NodeWatch):
 ```env
+# Convex Database (auto-generated)
 CONVEX_URL=your_convex_url
 CONVEX_DEPLOYMENT=your_deployment_name
-OPENAI_API_KEY=your_openai_key  # Optional, for LLM analysis
+
+# LLM Integration (OpenRouter)
+OPENROUTER_API_KEY=your_openrouter_key
+OPENROUTER_PREFERRED_MODEL=openrouter/sonoma-sky-alpha
+
+# Cost Tracking & Budgets
+ENABLE_COST_TRACKING=true
+COST_ALERT_THRESHOLD_USD=50.00
+DAILY_BUDGET_USD=100.00
+
+# Admin Dashboard
+ADMIN_ENABLED=true
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=nodewatch-admin-2024
+
+# Redis & Services (auto-configured)
+REDIS_URL=redis://localhost:6379
+NODE_ENV=development
+LOG_LEVEL=debug
 ```
+
+## Cost Management & Analytics
+
+NodeWatch includes comprehensive cost tracking and budget management:
+
+### 💰 **Cost Tracking Features**
+- **Automatic LLM Cost Calculation**: Real-time tracking of OpenRouter API costs
+- **Compute Cost Estimation**: Track processing time and resource usage
+- **Storage Cost Monitoring**: Database and cache operation costs
+- **Budget Alerts**: Configurable daily/monthly budget limits with notifications
+- **Cost Analytics**: Detailed breakdowns by provider, model, and operation type
+
+### 📊 **Analytics & Monitoring**
+- **Custom Analytics Engine**: Purpose-built for operational metrics (better than PostHog for this use case)
+- **Real-time Dashboards**: System health, performance, and cost monitoring
+- **Performance Tracking**: Success rates, throughput, and processing times
+- **Cache Analytics**: Hit rates, deduplication savings, and efficiency metrics
+
+### 🎯 **Budget Management**
+Configure in `.env.local`:
+```env
+DAILY_BUDGET_USD=100.00          # Daily spending limit
+COST_ALERT_THRESHOLD_USD=50.00   # Alert when approaching limit
+ENABLE_COST_TRACKING=true        # Enable/disable cost tracking
+```
+
+Access cost analytics at: http://localhost:3000/admin
 
 ## Security Considerations
 
@@ -357,6 +473,8 @@ OPENAI_API_KEY=your_openai_key  # Optional, for LLM analysis
 - Never execute untrusted code outside containers
 - Resource limits enforced for all analysis jobs
 - All activities logged for audit purposes
+- Admin dashboard protected with authentication
+- Cost tracking helps prevent runaway API expenses
 
 ## Current Implementation Status
 
@@ -366,23 +484,28 @@ We've built something pretty special here - the current implementation has excee
 
 - **🧠 Advanced Deobfuscation Engine**: Like having X-ray vision for encoded malware - detects Base64, hex, Unicode, and URL encoding with JavaScript-specific obfuscation patterns
 - **🎯 Sophisticated Pattern Detection**: 40+ malicious pattern detections including eval chains, prototype pollution, and dynamic require analysis
+- **🤖 Production-Ready AI Integration**: OpenRouter LLM integration with automatic cost tracking, budget management, and multiple model support
+- **📊 Comprehensive Admin Dashboard**: Real-time system monitoring, cost tracking, performance analytics, and operational visibility
 - **⚡ Real-time Job Processing**: Complete BullMQ integration with progress tracking, retry logic, and worker management that just works
 - **♻️ Content-based Deduplication**: Smart SHA-256 hashing system that eliminates redundant analysis across packages (because why analyze the same code twice?)
-- **🗄️ Enhanced Database Schema**: Comprehensive tracking of files, dependencies, and analysis results with proper indexing
+- **🗄️ Enhanced Database Schema**: Comprehensive tracking of files, dependencies, analysis results, costs, and analytics with proper indexing
+- **🚀 Development Automation**: One-command development environment with automated service orchestration and monitoring
 
 ### 📋 **What's Coming Next**
 
 *The roadmap ahead is exciting!*
 
 #### 🔥 High Priority (Core Features)
-- [ ] **🤖 Real LLM Integration**: OpenAI GPT-4 and Anthropic Claude API integration (because AI makes everything better)
-- [ ] **🐳 Dynamic Sandbox Analysis**: Docker-based behavioral monitoring and runtime analysis (watch packages run in isolation)
-- [ ] **📦 Batch Processing**: Top 1K package analysis workflow with prioritization (scale it up!)
-- [ ] **🎯 Enhanced Risk Scoring**: Weighted signal framework with transparent explanations (know exactly why something is risky)
+- [x] **🤖 LLM Integration**: ✅ OpenRouter API integration with cost tracking and budget management
+- [x] **📊 Admin Dashboard**: ✅ Real-time monitoring, cost tracking, and system analytics
+- [x] **🚀 Development Automation**: ✅ One-command setup and service orchestration
+- [ ] **🐳 Dynamic Sandbox Analysis**: Docker-based behavioral monitoring and runtime analysis (in progress)
+- [ ] **📦 Batch Processing**: Top 1K package analysis workflow with prioritization
+- [ ] **🎯 Enhanced Risk Scoring**: Weighted signal framework with transparent explanations
 
 #### 🛠️ Medium Priority (Production Features)
+- [x] **💰 Cost Management**: ✅ Comprehensive cost tracking with budget alerts and analytics
 - [ ] **🔐 API Security**: Authentication, rate limiting, and access control
-- [ ] **📊 Monitoring & Alerting**: Comprehensive metrics, dashboards, and notifications
 - [ ] **🎨 Advanced UI**: Dependency tree visualization and enhanced search capabilities
 
 #### 🌟 Future Enhancements
