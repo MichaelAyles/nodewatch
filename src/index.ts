@@ -1,10 +1,12 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
 import { Queue } from 'bullmq';
 import { convexClient } from './convex-client';
 import { config } from './config';
 import { logger } from './utils/logger';
 import { getRedisClient, closeRedisConnection } from './utils/redis';
+import adminDashboard from './admin/dashboard';
 
 const app = express();
 const port = config.port;
@@ -16,6 +18,16 @@ const analysisQueue = new Queue('analysis-queue', {
 
 app.use(cors());
 app.use(express.json());
+
+// Admin dashboard routes
+if (config.admin.enabled) {
+  app.use('/admin', adminDashboard);
+  
+  // Serve admin dashboard HTML
+  app.get('/admin', (req, res) => {
+    res.sendFile(path.join(__dirname, 'admin', 'dashboard.html'));
+  });
+}
 
 // Health check
 app.get('/health', (req, res) => {

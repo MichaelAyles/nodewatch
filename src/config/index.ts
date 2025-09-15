@@ -24,20 +24,30 @@ export interface Config {
 
   // LLM Configuration
   llm: {
-    openai: {
+    openrouter: {
       apiKey?: string;
-      model: string;
-      maxTokens: number;
-    };
-    anthropic: {
-      apiKey?: string;
-      model: string;
+      baseUrl: string;
+      preferredModel: string;
       maxTokens: number;
     };
     local: {
       url: string;
       model: string;
     };
+  };
+
+  // Cost Tracking
+  costTracking: {
+    enabled: boolean;
+    alertThresholdUsd: number;
+    dailyBudgetUsd: number;
+  };
+
+  // Admin Dashboard
+  admin: {
+    enabled: boolean;
+    username: string;
+    password: string;
   };
 
   // Analysis Configuration
@@ -112,20 +122,28 @@ export const config: Config = {
   },
 
   llm: {
-    openai: {
-      apiKey: process.env.OPENAI_API_KEY,
-      model: getEnvVar('OPENAI_MODEL', 'gpt-4'),
-      maxTokens: getEnvNumber('OPENAI_MAX_TOKENS', 4000),
-    },
-    anthropic: {
-      apiKey: process.env.ANTHROPIC_API_KEY,
-      model: getEnvVar('ANTHROPIC_MODEL', 'claude-3-sonnet-20240229'),
-      maxTokens: getEnvNumber('ANTHROPIC_MAX_TOKENS', 4000),
+    openrouter: {
+      apiKey: process.env.OPENROUTER_API_KEY,
+      baseUrl: getEnvVar('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),
+      preferredModel: getEnvVar('OPENROUTER_PREFERRED_MODEL', 'openrouter/sonoma-sky-alpha'),
+      maxTokens: getEnvNumber('OPENROUTER_MAX_TOKENS', 4000),
     },
     local: {
       url: getEnvVar('LOCAL_LLM_URL', 'http://localhost:11434'),
       model: getEnvVar('LOCAL_LLM_MODEL', 'llama3'),
     },
+  },
+
+  costTracking: {
+    enabled: getEnvBoolean('ENABLE_COST_TRACKING', true),
+    alertThresholdUsd: parseFloat(getEnvVar('COST_ALERT_THRESHOLD_USD', '50.00')),
+    dailyBudgetUsd: parseFloat(getEnvVar('DAILY_BUDGET_USD', '100.00')),
+  },
+
+  admin: {
+    enabled: getEnvBoolean('ADMIN_ENABLED', true),
+    username: getEnvVar('ADMIN_USERNAME', 'admin'),
+    password: getEnvVar('ADMIN_PASSWORD', 'change-me-in-production'),
   },
 
   analysis: {
@@ -170,12 +188,16 @@ export function validateConfig(): void {
   }
 
   if (config.nodeEnv === 'production') {
-    if (!config.llm.openai.apiKey && !config.llm.anthropic.apiKey) {
-      errors.push('At least one LLM API key (OPENAI_API_KEY or ANTHROPIC_API_KEY) is required in production');
+    if (!config.llm.openrouter.apiKey) {
+      errors.push('OPENROUTER_API_KEY is required in production');
     }
 
     if (config.monitoring.webhookSecret === 'default-secret') {
       errors.push('WEBHOOK_SECRET should be changed from default in production');
+    }
+
+    if (config.admin.password === 'change-me-in-production') {
+      errors.push('ADMIN_PASSWORD should be changed from default in production');
     }
   }
 

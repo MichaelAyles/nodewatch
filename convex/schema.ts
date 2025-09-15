@@ -260,4 +260,106 @@ export default defineSchema({
     total_packages_analyzed: v.number(),
     total_cost_usd: v.number(),
   }).index("by_timestamp", ["timestamp"]),
+
+  // Cost tracking
+  cost_entries: defineTable({
+    type: v.string(), // "llm", "compute", "storage"
+    provider: v.string(),
+    model: v.optional(v.string()),
+    operation: v.string(),
+    cost: v.number(),
+    currency: v.string(),
+    
+    // Metadata
+    tokens: v.optional(v.number()),
+    requests: v.optional(v.number()),
+    duration: v.optional(v.number()),
+    bytes: v.optional(v.number()),
+    package_name: v.optional(v.string()),
+    job_id: v.optional(v.string()),
+    
+    // Timestamps
+    timestamp: v.number(),
+    date: v.string(), // YYYY-MM-DD for easy daily aggregation
+    month: v.string(), // YYYY-MM for monthly aggregation
+  }).index("by_timestamp", ["timestamp"])
+    .index("by_date", ["date"])
+    .index("by_month", ["month"])
+    .index("by_type", ["type"])
+    .index("by_provider", ["provider"])
+    .index("by_package", ["package_name"]),
+
+  // Daily cost summaries
+  daily_costs: defineTable({
+    date: v.string(), // YYYY-MM-DD
+    total_cost: v.number(),
+    llm_cost: v.number(),
+    compute_cost: v.number(),
+    storage_cost: v.number(),
+    
+    // Breakdown by provider
+    cost_by_provider: v.object({
+      openrouter: v.number(),
+      local: v.number(),
+      convex: v.number(),
+    }),
+    
+    // Usage metrics
+    total_requests: v.number(),
+    total_tokens: v.number(),
+    total_analyses: v.number(),
+    
+    created_at: v.number(),
+    updated_at: v.number(),
+  }).index("by_date", ["date"]),
+
+  // Analytics events
+  analytics_events: defineTable({
+    event: v.string(),
+    properties: v.any(),
+    timestamp: v.number(),
+    date: v.string(), // YYYY-MM-DD
+    hour: v.string(), // YYYY-MM-DD-HH
+    
+    // Optional user tracking (for future use)
+    user_id: v.optional(v.string()),
+    session_id: v.optional(v.string()),
+    
+    // Environment context
+    environment: v.string(),
+    node_version: v.optional(v.string()),
+  }).index("by_timestamp", ["timestamp"])
+    .index("by_date", ["date"])
+    .index("by_hour", ["hour"])
+    .index("by_event", ["event"])
+    .index("by_environment", ["environment"]),
+
+  // System metrics (for monitoring dashboard)
+  system_metrics: defineTable({
+    timestamp: v.number(),
+    
+    // Queue metrics
+    queue_waiting: v.number(),
+    queue_active: v.number(),
+    queue_completed: v.number(),
+    queue_failed: v.number(),
+    
+    // Performance metrics
+    avg_response_time: v.number(),
+    memory_usage_mb: v.number(),
+    cpu_usage_percent: v.number(),
+    
+    // Cost metrics
+    daily_cost: v.number(),
+    monthly_cost: v.number(),
+    
+    // Analysis metrics
+    success_rate: v.number(),
+    throughput_per_hour: v.number(),
+    
+    // Cache metrics
+    cache_hit_rate: v.number(),
+    
+    created_at: v.number(),
+  }).index("by_timestamp", ["timestamp"]),
 });

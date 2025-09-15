@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NodeWatch Admin Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7fa;
+            color: #333;
+        }
+        
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border: 1px solid #e1e8ed;
+        }
+        
+        .card h3 {
+            color: #2c3e50;
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+        
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        
+        .metric:last-child {
+            border-bottom: none;
+        }
+        
+        .metric-label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+        
+        .metric-value {
+            font-weight: 600;
+            font-size: 1rem;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+        }
+        
+        .status-healthy { background: #27ae60; }
+        .status-warning { background: #f39c12; }
+        .status-error { background: #e74c3c; }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #ecf0f1;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 0.5rem 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3498db, #2980b9);
+            transition: width 0.3s ease;
+        }
+        
+        .cost-alert {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+        }
+        
+        .cost-safe {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+        }
+        
+        .table-container {
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-top: 2rem;
+        }
+        
+        .table-header {
+            background: #34495e;
+            color: white;
+            padding: 1rem;
+            font-weight: 600;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        th, td {
+            padding: 0.75rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid #e1e8ed;
+        }
+        
+        th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        
+        .refresh-btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+        }
+        
+        .refresh-btn:hover {
+            background: #2980b9;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #666;
+        }
+        
+        .error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+            padding: 1rem;
+            border-radius: 4px;
+            margin: 1rem 0;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+            
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔍 NodeWatch Admin Dashboard</h1>
+    </div>
+    
+    <div class="container">
+        <button class="refresh-btn" onclick="refreshDashboard()">🔄 Refresh Data</button>
+        
+        <div id="cost-alert"></div>
+        
+        <div class="dashboard-grid">
+            <!-- Queue Statistics -->
+            <div class="card">
+                <h3>📊 Queue Statistics</h3>
+                <div id="queue-stats">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+            
+            <!-- Cost Tracking -->
+            <div class="card">
+                <h3>💰 Cost Tracking</h3>
+                <div id="cost-stats">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+            
+            <!-- Database Statistics -->
+            <div class="card">
+                <h3>🗄️ Database Statistics</h3>
+                <div id="db-stats">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+            
+            <!-- System Health -->
+            <div class="card">
+                <h3>🏥 System Health</h3>
+                <div id="health-stats">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+            
+            <!-- Performance Metrics -->
+            <div class="card">
+                <h3>⚡ Performance</h3>
+                <div id="perf-stats">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+            
+            <!-- Cache Statistics -->
+            <div class="card">
+                <h3>🚀 Cache Performance</h3>
+                <div id="cache-stats">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Recent Jobs Table -->
+        <div class="table-container">
+            <div class="table-header">Recent Analysis Jobs</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Job ID</th>
+                        <th>Package</th>
+                        <th>Status</th>
+                        <th>Progress</th>
+                        <th>Cost</th>
+                        <th>Duration</th>
+                        <th>Created</th>
+                    </tr>
+                </thead>
+                <tbody id="jobs-table">
+                    <tr>
+                        <td colspan="7" class="loading">Loading jobs...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let dashboardData = {};
+        
+        async function fetchWithAuth(url) {
+            const username = prompt('Admin Username:') || 'admin';
+            const password = prompt('Admin Password:') || '';
+            
+            const credentials = btoa(`${username}:${password}`);
+            
+            const response = await fetch(url, {
+                headers: {
+                    'Authorization': `Basic ${credentials}`
+                }
+            });
+            
+            if (response.status === 401) {
+                alert('Invalid credentials');
+                return null;
+            }
+            
+            return response.json();
+        }
+        
+        async function loadDashboard() {
+            try {
+                const data = await fetchWithAuth('/admin/overview');
+                if (!data) return;
+                
+                dashboardData = data.data;
+                updateDashboard();
+            } catch (error) {
+                console.error('Failed to load dashboard:', error);
+                showError('Failed to load dashboard data');
+            }
+        }
+        
+        function updateDashboard() {
+            updateQueueStats();
+            updateCostStats();
+            updateDatabaseStats();
+            updateHealthStats();
+            updatePerformanceStats();
+            updateCacheStats();
+            loadRecentJobs();
+        }
+        
+        function updateQueueStats() {
+            const container = document.getElementById('queue-stats');
+            const queue = dashboardData.queue;
+            
+            container.innerHTML = `
+                <div class="metric">
+                    <span class="metric-label">Waiting</span>
+                    <span class="metric-value">${queue.waiting}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Active</span>
+                    <span class="metric-value">${queue.active}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Completed</span>
+                    <span class="metric-value">${queue.completed}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Failed</span>
+                    <span class="metric-value">${queue.failed}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Total</span>
+                    <span class="metric-value">${queue.total}</span>
+                </div>
+            `;
+        }
+        
+        function updateCostStats() {
+            const container = document.getElementById('cost-stats');
+            const costs = dashboardData.costs;
+            
+            // Show cost alert if needed
+            const alertContainer = document.getElementById('cost-alert');
+            const dailyUsage = (costs.today.total / costs.budget.daily) * 100;
+            
+            if (dailyUsage > 80) {
+                alertContainer.innerHTML = `
+                    <div class="cost-alert">
+                        ⚠️ High daily usage: $${costs.today.total.toFixed(2)} / $${costs.budget.daily.toFixed(2)} (${dailyUsage.toFixed(1)}%)
+                    </div>
+                `;
+            } else {
+                alertContainer.innerHTML = `
+                    <div class="cost-safe">
+                        ✅ Daily budget on track: $${costs.today.total.toFixed(2)} / $${costs.budget.daily.toFixed(2)} (${dailyUsage.toFixed(1)}%)
+                    </div>
+                `;
+            }
+            
+            container.innerHTML = `
+                <div class="metric">
+                    <span class="metric-label">Today Total</span>
+                    <span class="metric-value">$${costs.today.total.toFixed(2)}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">LLM Costs</span>
+                    <span class="metric-value">$${costs.today.llm.toFixed(2)}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Compute</span>
+                    <span class="metric-value">$${costs.today.compute.toFixed(2)}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Month Total</span>
+                    <span class="metric-value">$${costs.month.total.toFixed(2)}</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: ${dailyUsage}%"></div>
+                </div>
+            `;
+        }
+        
+        function updateDatabaseStats() {
+            const container = document.getElementById('db-stats');
+            const db = dashboardData.database;
+            
+            container.innerHTML = `
+                <div class="metric">
+                    <span class="metric-label">Total Packages</span>
+                    <span class="metric-value">${db.packages.total}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Analyzed</span>
+                    <span class="metric-value">${db.packages.analyzed}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Unique Files</span>
+                    <span class="metric-value">${db.files.unique.toLocaleString()}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Dedup Rate</span>
+                    <span class="metric-value">${db.files.deduplicationRate}%</span>
+                </div>
+            `;
+        }
+        
+        function updateHealthStats() {
+            const container = document.getElementById('health-stats');
+            const perf = dashboardData.performance;
+            
+            container.innerHTML = `
+                <div class="metric">
+                    <span class="metric-label">
+                        <span class="status-indicator status-healthy"></span>Redis
+                    </span>
+                    <span class="metric-value">${perf.redis.memory}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">
+                        <span class="status-indicator status-healthy"></span>Convex
+                    </span>
+                    <span class="metric-value">Connected</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Uptime</span>
+                    <span class="metric-value">${formatUptime(perf.system.uptime)}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Node.js</span>
+                    <span class="metric-value">${perf.system.nodeVersion}</span>
+                </div>
+            `;
+        }
+        
+        function updatePerformanceStats() {
+            const container = document.getElementById('perf-stats');
+            const perf = dashboardData.performance;
+            
+            container.innerHTML = `
+                <div class="metric">
+                    <span class="metric-label">Avg Processing</span>
+                    <span class="metric-value">${(perf.analysis.avgProcessingTime / 1000).toFixed(1)}s</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Success Rate</span>
+                    <span class="metric-value">${perf.analysis.successRate}%</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Throughput/hr</span>
+                    <span class="metric-value">${perf.analysis.throughputPerHour}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Memory Usage</span>
+                    <span class="metric-value">${(perf.system.memoryUsage.heapUsed / 1024 / 1024).toFixed(0)}MB</span>
+                </div>
+            `;
+        }
+        
+        function updateCacheStats() {
+            const container = document.getElementById('cache-stats');
+            const cache = dashboardData.database.cache;
+            
+            container.innerHTML = `
+                <div class="metric">
+                    <span class="metric-label">Hit Rate</span>
+                    <span class="metric-value">${cache.hitRate}%</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Total Hits</span>
+                    <span class="metric-value">${cache.totalHits.toLocaleString()}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Total Misses</span>
+                    <span class="metric-value">${cache.totalMisses.toLocaleString()}</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: ${cache.hitRate}%"></div>
+                </div>
+            `;
+        }
+        
+        async function loadRecentJobs() {
+            try {
+                const data = await fetchWithAuth('/admin/jobs?limit=10');
+                if (!data) return;
+                
+                const tbody = document.getElementById('jobs-table');
+                
+                if (data.data.jobs.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="loading">No recent jobs</td></tr>';
+                    return;
+                }
+                
+                tbody.innerHTML = data.data.jobs.map(job => `
+                    <tr>
+                        <td>${job.id}</td>
+                        <td>${job.data.packageName}@${job.data.version}</td>
+                        <td>${job.state}</td>
+                        <td>${job.progress || 0}%</td>
+                        <td>$0.00</td>
+                        <td>${job.duration || 0}ms</td>
+                        <td>${new Date(job.createdAt).toLocaleString()}</td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                console.error('Failed to load jobs:', error);
+            }
+        }
+        
+        function formatUptime(seconds) {
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            return `${hours}h ${minutes}m`;
+        }
+        
+        function showError(message) {
+            const container = document.querySelector('.container');
+            container.insertAdjacentHTML('afterbegin', `
+                <div class="error">${message}</div>
+            `);
+        }
+        
+        function refreshDashboard() {
+            loadDashboard();
+        }
+        
+        // Auto-refresh every 30 seconds
+        setInterval(loadDashboard, 30000);
+        
+        // Initial load
+        loadDashboard();
+    </script>
+</body>
+</html>
