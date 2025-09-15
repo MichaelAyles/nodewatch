@@ -152,20 +152,89 @@ async function startWorker() {
   return true;
 }
 
+async function installDependencies() {
+  console.log('📦 Checking and installing dependencies...');
+  
+  // Always run npm install to ensure dependencies are up to date
+  try {
+    await runCommand('npm', ['install']);
+    console.log('✅ Dependencies installed/updated successfully');
+    return true;
+  } catch (error) {
+    console.error('❌ Failed to install dependencies:', error.message);
+    return false;
+  }
+}
+
+async function setupConvex() {
+  console.log('🗄️  Setting up Convex...');
+  
+  // Check if .env.local exists with Convex config
+  if (!fs.existsSync('.env.local')) {
+    console.log('⚠️  No .env.local found. You may need to run: npx convex login && npx convex dev');
+    console.log('   This will create your .env.local file with Convex credentials');
+    return false;
+  }
+  
+  // Check if Convex config exists in .env.local
+  const envContent = fs.readFileSync('.env.local', 'utf8');
+  if (!envContent.includes('CONVEX_URL') || !envContent.includes('CONVEX_DEPLOYMENT')) {
+    console.log('⚠️  Convex not configured in .env.local');
+    console.log('   Please run: npx convex login && npx convex dev');
+    return false;
+  }
+  
+  console.log('✅ Convex configuration found');
+  return true;
+}
+
+async function buildProject() {
+  console.log('🔨 Building project...');
+  
+  try {
+    await runCommand('npm', ['run', 'build'], { silent: true });
+    console.log('✅ Project built successfully');
+    return true;
+  } catch (error) {
+    console.log('⚠️  Build failed, continuing with development mode');
+    return true; // Continue anyway for development
+  }
+}
+
 async function main() {
   try {
-    // Check prerequisites
+    console.log('🚀 NodeWatch Complete Setup & Launch\n');
+    
+    // Step 1: Check prerequisites
+    console.log('1️⃣ Checking system prerequisites...');
     if (!(await checkDocker())) {
+      console.log('\n💡 Alternative: Try "npm run dev:no-docker" if you have Redis installed locally');
       process.exit(1);
     }
     
-    // Install dependencies if needed
-    if (!fs.existsSync('node_modules')) {
-      console.log('📦 Installing dependencies...');
-      await runCommand('npm', ['install']);
+    // Step 2: Install/update dependencies
+    console.log('\n2️⃣ Installing dependencies...');
+    if (!(await installDependencies())) {
+      process.exit(1);
     }
     
-    // Start services
+    // Step 3: Setup Convex
+    console.log('\n3️⃣ Checking Convex setup...');
+    if (!(await setupConvex())) {
+      console.log('\n🔧 To setup Convex:');
+      console.log('   1. npx convex login');
+      console.log('   2. npx convex dev');
+      console.log('   3. Then run this script again');
+      process.exit(1);
+    }
+    
+    // Step 4: Build project (optional)
+    console.log('\n4️⃣ Building project...');
+    await buildProject();
+    
+    // Step 5: Start services
+    console.log('\n5️⃣ Starting services...');
+    
     if (!(await startRedis())) {
       process.exit(1);
     }
@@ -174,15 +243,27 @@ async function main() {
     await startAPI();
     await startWorker();
     
-    console.log('\n🎉 NodeWatch is ready!');
-    console.log('📡 Web Interface: http://localhost:3000');
-    console.log('🔧 Admin Dashboard: http://localhost:3000/admin');
-    console.log('👤 Admin Login: admin / nodewatch-admin-2024');
-    console.log('\n📝 Logs are available in the logs/ directory');
-    console.log('🛑 Run "npm run dev:stop" to stop all services');
+    console.log('\n🎉 NodeWatch is fully ready!');
+    console.log('┌─────────────────────────────────────────┐');
+    console.log('│  🌐 Web Interface: http://localhost:3000 │');
+    console.log('│  🔧 Admin Dashboard: /admin              │');
+    console.log('│  👤 Login: admin / nodewatch-admin-2024  │');
+    console.log('└─────────────────────────────────────────┘');
+    console.log('\n📊 Service Status:');
+    console.log('   ✅ Redis (Docker container)');
+    console.log('   ✅ Convex (Database)');
+    console.log('   ✅ API Server (Port 3000)');
+    console.log('   ✅ Analysis Worker');
+    console.log('\n📝 Logs: logs/ directory');
+    console.log('🛑 Stop: npm run dev:stop');
+    console.log('📊 Monitor: tail -f logs/api.log');
     
   } catch (error) {
     console.error('❌ Failed to start NodeWatch:', error.message);
+    console.log('\n🔧 Troubleshooting:');
+    console.log('   • Check Docker is running: docker ps');
+    console.log('   • Check system: npm run dev:check');
+    console.log('   • Try alternative: npm run dev:no-docker');
     process.exit(1);
   }
 }

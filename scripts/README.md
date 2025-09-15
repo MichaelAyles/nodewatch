@@ -4,21 +4,21 @@ This directory contains scripts to easily start and manage NodeWatch development
 
 ## Quick Start (Recommended)
 
-### If Docker is Running:
+### Complete Setup & Launch (Recommended):
 ```bash
-# One command to start everything with Docker
+# Installs dependencies, checks setup, starts everything
 npm run dev:all
 ```
 
-### If Docker is NOT Available:
+### Alternative for No Docker:
 ```bash
-# Start with local Redis (requires Redis installed)
+# Same complete setup but uses local Redis
 npm run dev:no-docker
 ```
 
-### Background Mode:
+### Quick Background Mode:
 ```bash
-# Start everything in background (requires Docker)
+# Legacy quick start (minimal setup)
 npm run dev:quick
 ```
 
@@ -38,15 +38,26 @@ npm run dev:stop
 ## Available Scripts
 
 ### `npm run dev:all` (Recommended)
-- **Best for**: Most users with Docker
-- **What it does**: Starts all services including Redis in Docker
+- **Best for**: Complete automated setup
+- **What it does**: 
+  - ✅ Installs/updates all npm dependencies
+  - ✅ Checks Convex configuration
+  - ✅ Builds project (if needed)
+  - ✅ Starts Redis in Docker container
+  - ✅ Launches all services (Convex, API, Worker)
+  - ✅ Provides complete status dashboard
 - **Requirements**: Docker running
 - **Logs**: Services run in background, check logs/ directory
 - **Stop**: `npm run dev:stop`
 
 ### `npm run dev:no-docker`
 - **Best for**: Users without Docker or prefer local Redis
-- **What it does**: Starts all services using local Redis
+- **What it does**: 
+  - ✅ Installs/updates all npm dependencies
+  - ✅ Checks Convex configuration
+  - ✅ Verifies local Redis is running
+  - ✅ Launches all services (Convex, API, Worker)
+  - ✅ Provides complete status dashboard
 - **Requirements**: Redis installed locally (brew install redis)
 - **Logs**: Services run in background, check logs/ directory
 - **Stop**: `npm run dev:stop`

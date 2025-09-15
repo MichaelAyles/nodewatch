@@ -124,7 +124,7 @@ OPENROUTER_API_KEY=your_api_key_here
 
 4. **Start everything with one command**:
 ```bash
-npm run dev:quick
+npm run dev:all
 ```
 
 5. **Access your services**:
@@ -132,7 +132,12 @@ npm run dev:quick
    - **Admin Dashboard**: http://localhost:3000/admin
    - **Login**: admin / nodewatch-admin-2024
 
-That's it! 🎉 All services (Redis, Convex, API, Worker) start automatically.
+That's it! 🎉 The script automatically:
+- ✅ Installs/updates all dependencies
+- ✅ Checks Convex configuration
+- ✅ Starts Redis (Docker container)
+- ✅ Launches all services (Convex, API, Worker)
+- ✅ Provides complete status and access information
 
 ## Usage
 
