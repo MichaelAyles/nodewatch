@@ -4,21 +4,23 @@ This directory contains scripts to easily start and manage NodeWatch development
 
 ## Quick Start (Recommended)
 
+### If Docker is Running:
 ```bash
-# One command to start everything
-npm run dev:quick
-```
-
-This starts all services in the background and exits. Perfect for quick testing.
-
-## Full Development Environment
-
-```bash
-# Interactive development with live logs
+# One command to start everything with Docker
 npm run dev:all
 ```
 
-This starts all services and shows live logs. Press Ctrl+C to stop everything.
+### If Docker is NOT Available:
+```bash
+# Start with local Redis (requires Redis installed)
+npm run dev:no-docker
+```
+
+### Background Mode:
+```bash
+# Start everything in background (requires Docker)
+npm run dev:quick
+```
 
 ## Manual Control
 
@@ -35,17 +37,25 @@ npm run dev:stop
 
 ## Available Scripts
 
-### `npm run dev:quick`
-- **Best for**: Quick testing and demos
-- **What it does**: Starts all services in background, exits immediately
-- **Logs**: Services run detached (use `npm run logs` to view)
+### `npm run dev:all` (Recommended)
+- **Best for**: Most users with Docker
+- **What it does**: Starts all services including Redis in Docker
+- **Requirements**: Docker running
+- **Logs**: Services run in background, check logs/ directory
 - **Stop**: `npm run dev:stop`
 
-### `npm run dev:all`
-- **Best for**: Active development
-- **What it does**: Starts all services with live log monitoring
-- **Logs**: Shows live API logs in terminal
-- **Stop**: Ctrl+C (stops everything automatically)
+### `npm run dev:no-docker`
+- **Best for**: Users without Docker or prefer local Redis
+- **What it does**: Starts all services using local Redis
+- **Requirements**: Redis installed locally (brew install redis)
+- **Logs**: Services run in background, check logs/ directory
+- **Stop**: `npm run dev:stop`
+
+### `npm run dev:quick`
+- **Best for**: Quick testing (legacy)
+- **What it does**: Starts all services in background, exits immediately
+- **Requirements**: Docker
+- **Stop**: `npm run dev:stop`
 
 ### `npm run dev:shell` (Linux/Mac only)
 - **Best for**: Advanced users who want shell script control

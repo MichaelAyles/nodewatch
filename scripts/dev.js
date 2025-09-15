@@ -59,6 +59,9 @@ class DevLauncher {
   async checkCommand(command) {
     return new Promise((resolve) => {
       exec(`which ${command}`, (error) => {
+        if (error) {
+          this.error(`Command '${command}' not found: ${error.message}`);
+        }
         resolve(!error);
       });
     });
@@ -102,8 +105,8 @@ class DevLauncher {
   async startRedis() {
     this.info('Starting Redis...');
     
-    // Check if Redis container already exists
     return new Promise((resolve) => {
+      // First, check if Redis is already running
       exec('docker ps --filter name=nodewatch-redis --format "{{.Names}}"', (error, stdout) => {
         if (stdout.trim() === 'nodewatch-redis') {
           this.success('Redis is already running');
@@ -111,30 +114,45 @@ class DevLauncher {
           return;
         }
         
-        // Start new Redis container
-        const redisProcess = spawn('docker', [
-          'run', '-d',
-          '--name', 'nodewatch-redis',
-          '-p', '6379:6379',
-          'redis:7-alpine',
-          'redis-server', '--appendonly', 'yes', '--maxmemory', '256mb'
-        ]);
-        
-        redisProcess.on('close', async (code) => {
-          if (code === 0) {
-            // Wait for Redis to be ready
-            const isReady = await this.waitForService('Redis', async () => {
-              return new Promise((resolve) => {
-                exec('docker exec nodewatch-redis redis-cli ping', (error, stdout) => {
-                  resolve(stdout.trim() === 'PONG');
-                });
-              });
-            });
-            resolve(isReady);
-          } else {
-            this.error('Failed to start Redis');
+        // Clean up any stopped container with the same name
+        exec('docker rm nodewatch-redis 2>/dev/null', () => {
+          // Start new Redis container
+          const redisProcess = spawn('docker', [
+            'run', '-d',
+            '--name', 'nodewatch-redis',
+            '-p', '6379:6379',
+            'redis:7-alpine',
+            'redis-server', '--appendonly', 'yes', '--maxmemory', '256mb'
+          ]);
+          
+          redisProcess.stdout.on('data', (data) => {
+            // Container ID output means success
+            if (data.toString().trim().length > 0) {
+              this.waitForRedisReady().then(resolve);
+            }
+          });
+          
+          redisProcess.stderr.on('data', (data) => {
+            this.error(`Redis startup error: ${data.toString()}`);
             resolve(false);
-          }
+          });
+          
+          redisProcess.on('close', (code) => {
+            if (code !== 0) {
+              this.error(`Redis container failed to start (exit code: ${code})`);
+              resolve(false);
+            }
+          });
+        });
+      });
+    });
+  }
+
+  async waitForRedisReady() {
+    return await this.waitForService('Redis', async () => {
+      return new Promise((resolve) => {
+        exec('docker exec nodewatch-redis redis-cli ping', (error, stdout) => {
+          resolve(!error && stdout.trim() === 'PONG');
         });
       });
     });
