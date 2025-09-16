@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "commonjs",
-    "lib": ["ES2022"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": true,
@@ -17,6 +17,7 @@
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "allowSyntheticDefaultImports": true,
+    "jsx": "react-jsx",
     "baseUrl": "./src",
     "paths": {
       "@/*": ["*"],
@@ -35,6 +36,7 @@
     "dist",
     "**/*.test.ts",
     "**/*.spec.ts",
-    "coverage"
+    "coverage",
+    "src/frontend"
   ]
 }

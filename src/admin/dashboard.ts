@@ -302,7 +302,7 @@ async function getSystemHealth() {
   } catch (error) {
     logger.error('Health check failed', error);
     return {
-      redis: { status: 'error', error: error.message },
+      redis: { status: 'error', error: error instanceof Error ? error.message : 'Unknown error' },
       convex: { status: 'unknown' },
       workers: { status: 'unknown' },
       api: { status: 'healthy', uptime: process.uptime() }

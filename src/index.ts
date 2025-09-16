@@ -1,20 +1,73 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import { createServer } from 'http';
+import { Server as SocketIOServer } from 'socket.io';
 import { Queue } from 'bullmq';
 import { convexClient } from './convex-client';
 import { config } from './config';
 import { logger } from './utils/logger';
-import { getRedisClient, closeRedisConnection } from './utils/redis';
+import { getRedisClient, closeRedisConnection, redisCache } from './utils/redis';
 import adminDashboard from './admin/dashboard';
+import { api } from '../convex/_generated/api';
 
 const app = express();
+const server = createServer(app);
+const io = new SocketIOServer(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
 const port = config.port;
 
 // Job queue for analysis tasks
 const analysisQueue = new Queue('analysis-queue', {
   connection: getRedisClient(),
 });
+
+// WebSocket connection handling
+io.on('connection', (socket) => {
+  logger.info(`WebSocket client connected: ${socket.id}`);
+  
+  socket.on('subscribe-stats', () => {
+    socket.join('stats-updates');
+    logger.info(`Client ${socket.id} subscribed to stats updates`);
+  });
+  
+  socket.on('unsubscribe-stats', () => {
+    socket.leave('stats-updates');
+    logger.info(`Client ${socket.id} unsubscribed from stats updates`);
+  });
+  
+  socket.on('disconnect', () => {
+    logger.info(`WebSocket client disconnected: ${socket.id}`);
+  });
+});
+
+// Function to broadcast stats updates
+function broadcastStatsUpdate(stats: any) {
+  io.to('stats-updates').emit('stats-update', stats);
+}
+
+// Cache configuration
+const CACHE_KEYS = {
+  SYSTEM_STATS: 'system:stats',
+  HEALTH_METRICS: 'system:health',
+  RECENT_ACTIVITY: 'system:activity',
+  RECENT_FINDINGS: 'system:findings',
+  TOP_PACKAGES: 'system:top-packages',
+  QUEUE_STATS: 'system:queue-stats',
+} as const;
+
+const CACHE_TTL = {
+  SYSTEM_STATS: 30, // 30 seconds for real-time stats
+  HEALTH_METRICS: 300, // 5 minutes for health metrics
+  RECENT_ACTIVITY: 60, // 1 minute for activity
+  RECENT_FINDINGS: 120, // 2 minutes for findings
+  TOP_PACKAGES: 600, // 10 minutes for top packages
+  QUEUE_STATS: 15, // 15 seconds for queue stats
+} as const;
 
 app.use(cors());
 app.use(express.json());
@@ -208,25 +261,376 @@ app.get('/api/packages/recent', async (req, res) => {
   }
 });
 
-// Get queue statistics
-app.get('/api/queue/stats', async (req, res) => {
+// Get system statistics for homepage with caching
+app.get('/api/stats', async (req, res) => {
   try {
-    const waiting = await analysisQueue.getWaiting();
-    const active = await analysisQueue.getActive();
-    const completed = await analysisQueue.getCompleted();
-    const failed = await analysisQueue.getFailed();
+    logger.apiRequest('GET', '/api/stats', req.ip);
+    
+    // Try to get from cache first
+    const cachedStats = await redisCache.get(CACHE_KEYS.SYSTEM_STATS);
+    if (cachedStats) {
+      return res.json({
+        success: true,
+        stats: cachedStats,
+        cached: true,
+        timestamp: Date.now()
+      });
+    }
+    
+    // Fetch fresh data from Convex
+    const stats = await convexClient.query(api.stats.getSystemStats);
+    
+    // Cache the results
+    await redisCache.set(CACHE_KEYS.SYSTEM_STATS, stats, CACHE_TTL.SYSTEM_STATS);
+    
+    // Broadcast to WebSocket clients
+    broadcastStatsUpdate(stats);
     
     res.json({
       success: true,
-      stats: {
+      stats,
+      cached: false,
+      timestamp: Date.now()
+    });
+  } catch (error: any) {
+    logger.apiError('GET', '/api/stats', error, req.ip);
+    
+    // Try to return stale cached data on error
+    const staleStats = await redisCache.get(CACHE_KEYS.SYSTEM_STATS);
+    if (staleStats) {
+      return res.json({
+        success: true,
+        stats: staleStats,
+        cached: true,
+        stale: true,
+        timestamp: Date.now()
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get recent activity with caching
+app.get('/api/stats/activity', async (req, res) => {
+  try {
+    const hours = parseInt(req.query.hours as string) || 24;
+    logger.apiRequest('GET', '/api/stats/activity', req.ip);
+    
+    const cacheKey = `${CACHE_KEYS.RECENT_ACTIVITY}:${hours}`;
+    
+    // Try to get from cache first
+    const cachedActivity = await redisCache.get(cacheKey);
+    if (cachedActivity) {
+      return res.json({
+        success: true,
+        activity: cachedActivity,
+        cached: true,
+        timestamp: Date.now()
+      });
+    }
+    
+    // Fetch fresh data from Convex
+    const activity = await convexClient.query(api.stats.getRecentActivity, { hours });
+    
+    // Cache the results
+    await redisCache.set(cacheKey, activity, CACHE_TTL.RECENT_ACTIVITY);
+    
+    res.json({
+      success: true,
+      activity,
+      cached: false,
+      timestamp: Date.now()
+    });
+  } catch (error: any) {
+    logger.apiError('GET', '/api/stats/activity', error, req.ip);
+    
+    // Try to return stale cached data on error
+    const hours = parseInt(req.query.hours as string) || 24;
+    const cacheKey = `${CACHE_KEYS.RECENT_ACTIVITY}:${hours}`;
+    const staleActivity = await redisCache.get(cacheKey);
+    if (staleActivity) {
+      return res.json({
+        success: true,
+        activity: staleActivity,
+        cached: true,
+        stale: true,
+        timestamp: Date.now()
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get health metrics with caching
+app.get('/api/health/metrics', async (req, res) => {
+  try {
+    logger.apiRequest('GET', '/api/health/metrics', req.ip);
+    
+    // Try to get from cache first
+    const cachedMetrics = await redisCache.get(CACHE_KEYS.HEALTH_METRICS);
+    if (cachedMetrics) {
+      return res.json({
+        success: true,
+        metrics: cachedMetrics,
+        cached: true,
+        timestamp: Date.now()
+      });
+    }
+    
+    // Fetch fresh data from Convex
+    const metrics = await convexClient.query(api.stats.getHealthMetrics);
+    
+    // Cache the results
+    await redisCache.set(CACHE_KEYS.HEALTH_METRICS, metrics, CACHE_TTL.HEALTH_METRICS);
+    
+    res.json({
+      success: true,
+      metrics,
+      cached: false,
+      timestamp: Date.now()
+    });
+  } catch (error: any) {
+    logger.apiError('GET', '/api/health/metrics', error, req.ip);
+    
+    // Try to return stale cached data on error
+    const staleMetrics = await redisCache.get(CACHE_KEYS.HEALTH_METRICS);
+    if (staleMetrics) {
+      return res.json({
+        success: true,
+        metrics: staleMetrics,
+        cached: true,
+        stale: true,
+        timestamp: Date.now()
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get recent security findings
+app.get('/api/findings/recent', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 6;
+    logger.apiRequest('GET', '/api/findings/recent', req.ip);
+    
+    // TODO: Replace with actual Convex API call
+    // const findings = await convexClient.query(api.findings.getRecentFindings, { limit });
+    
+    // Mock data for now
+    const mockFindings = [
+      {
+        id: '1',
+        packageName: 'malicious-package-v2',
+        version: '1.2.3',
+        threatType: 'malware',
+        severity: 'critical',
+        discoveryDate: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
+        summary: 'Contains cryptocurrency mining code that runs in background processes',
+        impactDescription: 'Unauthorized cryptocurrency mining using system resources',
+        affectedDownloads: 15420,
+      },
+      {
+        id: '2',
+        packageName: 'fake-lodash',
+        version: '4.17.22',
+        threatType: 'typosquatting',
+        severity: 'high',
+        discoveryDate: new Date(Date.now() - 6 * 60 * 60 * 1000), // 6 hours ago
+        summary: 'Typosquatting attack mimicking popular lodash library',
+        impactDescription: 'Steals environment variables and sends them to remote server',
+        affectedDownloads: 8934,
+      },
+      {
+        id: '3',
+        packageName: 'suspicious-util',
+        version: '2.1.0',
+        threatType: 'credential_theft',
+        severity: 'high',
+        discoveryDate: new Date(Date.now() - 12 * 60 * 60 * 1000), // 12 hours ago
+        summary: 'Attempts to access and exfiltrate SSH keys and AWS credentials',
+        impactDescription: 'Potential unauthorized access to cloud infrastructure',
+        affectedDownloads: 3247,
+      },
+      {
+        id: '4',
+        packageName: 'backdoor-express',
+        version: '1.0.5',
+        threatType: 'backdoor',
+        severity: 'critical',
+        discoveryDate: new Date(Date.now() - 18 * 60 * 60 * 1000), // 18 hours ago
+        summary: 'Creates hidden HTTP endpoint for remote code execution',
+        impactDescription: 'Allows attackers to execute arbitrary commands on server',
+        affectedDownloads: 12678,
+      },
+    ].slice(0, limit);
+    
+    res.json({
+      success: true,
+      findings: mockFindings
+    });
+  } catch (error: any) {
+    logger.apiError('GET', '/api/findings/recent', error, req.ip);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get top packages
+app.get('/api/packages/top', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 12;
+    logger.apiRequest('GET', '/api/packages/top', req.ip);
+    
+    // TODO: Replace with actual Convex API call
+    // const packages = await convexClient.query(api.packages.getTopPackages, { limit });
+    
+    // Mock data for now
+    const mockPackages = [
+      {
+        name: 'lodash',
+        version: '4.17.21',
+        weeklyDownloads: 45000000,
+        riskScore: 15,
+        riskLevel: 'safe',
+        analysisStatus: 'completed',
+        lastAnalyzed: new Date(Date.now() - 2 * 60 * 60 * 1000),
+        shortDescription: 'A modern JavaScript utility library delivering modularity, performance & extras.',
+        maintainer: 'lodash',
+      },
+      {
+        name: 'react',
+        version: '18.2.0',
+        weeklyDownloads: 20000000,
+        riskScore: 8,
+        riskLevel: 'safe',
+        analysisStatus: 'completed',
+        lastAnalyzed: new Date(Date.now() - 1 * 60 * 60 * 1000),
+        shortDescription: 'React is a JavaScript library for building user interfaces.',
+        maintainer: 'facebook',
+      },
+      {
+        name: 'express',
+        version: '4.18.2',
+        weeklyDownloads: 15000000,
+        riskScore: 22,
+        riskLevel: 'low',
+        analysisStatus: 'completed',
+        lastAnalyzed: new Date(Date.now() - 3 * 60 * 60 * 1000),
+        shortDescription: 'Fast, unopinionated, minimalist web framework for node.',
+        maintainer: 'expressjs',
+      },
+      {
+        name: 'axios',
+        version: '1.6.0',
+        weeklyDownloads: 12000000,
+        riskScore: 18,
+        riskLevel: 'safe',
+        analysisStatus: 'in_progress',
+        shortDescription: 'Promise based HTTP client for the browser and node.js',
+        maintainer: 'axios',
+      },
+    ].slice(0, limit);
+    
+    res.json({
+      success: true,
+      packages: mockPackages
+    });
+  } catch (error: any) {
+    logger.apiError('GET', '/api/packages/top', error, req.ip);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get queue statistics with caching and real-time updates
+app.get('/api/queue/stats', async (req, res) => {
+  try {
+    logger.apiRequest('GET', '/api/queue/stats', req.ip);
+    
+    // Try to get from cache first
+    const cachedQueueStats = await redisCache.get(CACHE_KEYS.QUEUE_STATS);
+    if (cachedQueueStats) {
+      return res.json({
+        success: true,
+        stats: cachedQueueStats,
+        cached: true,
+        timestamp: Date.now()
+      });
+    }
+    
+    // Fetch fresh data from both BullMQ and Convex
+    const [waiting, active, completed, failed] = await Promise.all([
+      analysisQueue.getWaiting(),
+      analysisQueue.getActive(),
+      analysisQueue.getCompleted(),
+      analysisQueue.getFailed()
+    ]);
+    
+    // Get additional queue metrics from Convex
+    const convexQueueStats = await convexClient.query(api.stats.getQueueStatus);
+    
+    const queueStats = {
+      // BullMQ stats
+      bullmq: {
         waiting: waiting.length,
         active: active.length,
         completed: completed.length,
         failed: failed.length,
         total: waiting.length + active.length + completed.length + failed.length
-      }
+      },
+      // Convex stats
+      convex: convexQueueStats,
+      // Combined metrics
+      currentlyAnalyzing: active.length,
+      queueDepth: waiting.length,
+      totalProcessed: completed.length,
+      failureRate: failed.length > 0 ? Math.round((failed.length / (completed.length + failed.length)) * 100) : 0,
+      timestamp: Date.now()
+    };
+    
+    // Cache the results
+    await redisCache.set(CACHE_KEYS.QUEUE_STATS, queueStats, CACHE_TTL.QUEUE_STATS);
+    
+    // Broadcast to WebSocket clients
+    io.to('stats-updates').emit('queue-update', queueStats);
+    
+    res.json({
+      success: true,
+      stats: queueStats,
+      cached: false,
+      timestamp: Date.now()
     });
   } catch (error: any) {
+    logger.apiError('GET', '/api/queue/stats', error, req.ip);
+    
+    // Try to return stale cached data on error
+    const staleQueueStats = await redisCache.get(CACHE_KEYS.QUEUE_STATS);
+    if (staleQueueStats) {
+      return res.json({
+        success: true,
+        stats: staleQueueStats,
+        cached: true,
+        stale: true,
+        timestamp: Date.now()
+      });
+    }
+    
     res.status(500).json({
       success: false,
       error: error.message
@@ -279,199 +683,122 @@ app.get('/api/queue/jobs', async (req, res) => {
   }
 });
 
-// Simple frontend
-app.get('/', (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>NodeWatch - NPM Package Security Scanner</title>
-      <style>
-        body { 
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          max-width: 800px;
-          margin: 50px auto;
-          padding: 20px;
-          background: #f5f5f5;
-        }
-        .container {
-          background: white;
-          padding: 30px;
-          border-radius: 10px;
-          box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        h1 { color: #333; }
-        input, button {
-          padding: 10px;
-          margin: 10px 5px;
-          border: 1px solid #ddd;
-          border-radius: 5px;
-          font-size: 16px;
-        }
-        input { width: 300px; }
-        button {
-          background: #007bff;
-          color: white;
-          cursor: pointer;
-          padding: 10px 20px;
-        }
-        button:hover { background: #0056b3; }
-        #results {
-          margin-top: 30px;
-          padding: 20px;
-          background: #f8f9fa;
-          border-radius: 5px;
-          white-space: pre-wrap;
-          font-family: 'Courier New', monospace;
-          font-size: 14px;
-          max-height: 500px;
-          overflow-y: auto;
-        }
-        .loading { color: #007bff; }
-        .error { color: #dc3545; }
-        .safe { color: #28a745; }
-        .low { color: #17a2b8; }
-        .medium { color: #ffc107; }
-        .high { color: #fd7e14; }
-        .critical { color: #dc3545; font-weight: bold; }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <h1>🔍 NodeWatch</h1>
-        <p>Analyze NPM packages for potential security risks</p>
-        
-        <div>
-          <input type="text" id="packageName" placeholder="Enter package name (e.g., lodash)" />
-          <input type="text" id="version" placeholder="Version (optional)" />
-          <button onclick="analyzePackage()">Analyze</button>
-        </div>
-        
-        <div id="results"></div>
-      </div>
+// Cache management endpoints
+app.post('/api/cache/invalidate', async (req, res) => {
+  try {
+    const { keys } = req.body;
+    logger.apiRequest('POST', '/api/cache/invalidate', req.ip);
+    
+    if (!keys || !Array.isArray(keys)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Keys array is required'
+      });
+    }
+    
+    const results = await Promise.all(
+      keys.map(async (key: string) => {
+        const deleted = await redisCache.del(key);
+        return { key, deleted };
+      })
+    );
+    
+    res.json({
+      success: true,
+      results,
+      timestamp: Date.now()
+    });
+  } catch (error: any) {
+    logger.apiError('POST', '/api/cache/invalidate', error, req.ip);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
 
-      <script>
-        let currentJobId = null;
-        let pollInterval = null;
-        
-        async function analyzePackage() {
-          const packageName = document.getElementById('packageName').value;
-          const version = document.getElementById('version').value;
-          const resultsDiv = document.getElementById('results');
-          
-          if (!packageName) {
-            resultsDiv.innerHTML = '<span class="error">Please enter a package name</span>';
-            return;
-          }
-          
-          // Clear any existing polling
-          if (pollInterval) {
-            clearInterval(pollInterval);
-          }
-          
-          resultsDiv.innerHTML = '<span class="loading">Queuing analysis for ' + packageName + '...</span>';
-          
-          try {
-            // Submit job to queue
-            const response = await fetch('/api/analyze', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ name: packageName, version })
-            });
-            
-            const data = await response.json();
-            
-            if (data.success) {
-              currentJobId = data.jobId;
-              resultsDiv.innerHTML = 
-                '<h3>Analysis Queued</h3>' +
-                '<strong>Job ID:</strong> ' + data.jobId + '\\n' +
-                '<strong>Status:</strong> <span class="loading">Queued</span>\\n' +
-                '<strong>Progress:</strong> <span id="progress">0%</span>\\n\\n' +
-                '<div id="progressBar" style="width: 100%; background: #f0f0f0; border-radius: 5px;">' +
-                '<div id="progressFill" style="width: 0%; background: #007bff; height: 20px; border-radius: 5px; transition: width 0.3s;"></div>' +
-                '</div>';
-              
-              // Start polling for status
-              pollJobStatus(data.jobId);
-            } else {
-              resultsDiv.innerHTML = '<span class="error">Error: ' + data.error + '</span>';
-            }
-          } catch (error) {
-            resultsDiv.innerHTML = '<span class="error">Error: ' + error.message + '</span>';
-          }
-        }
-        
-        async function pollJobStatus(jobId) {
-          pollInterval = setInterval(async () => {
-            try {
-              const statusResponse = await fetch('/api/job/' + jobId + '/status');
-              const statusData = await statusResponse.json();
-              
-              if (statusData.success) {
-                const progress = statusData.progress || 0;
-                const status = statusData.status;
-                
-                // Update progress display
-                document.getElementById('progress').textContent = progress + '%';
-                document.getElementById('progressFill').style.width = progress + '%';
-                
-                if (status === 'completed') {
-                  clearInterval(pollInterval);
-                  await fetchJobResult(jobId);
-                } else if (status === 'failed') {
-                  clearInterval(pollInterval);
-                  document.getElementById('results').innerHTML = 
-                    '<span class="error">Analysis failed: ' + (statusData.failedReason || 'Unknown error') + '</span>';
-                } else {
-                  // Update status text
-                  const statusElement = document.querySelector('#results .loading');
-                  if (statusElement) {
-                    statusElement.textContent = status.charAt(0).toUpperCase() + status.slice(1);
-                    statusElement.className = status === 'active' ? 'loading' : 'info';
-                  }
-                }
-              }
-            } catch (error) {
-              console.error('Error polling job status:', error);
-            }
-          }, 1000); // Poll every second
-        }
-        
-        async function fetchJobResult(jobId) {
-          try {
-            const resultResponse = await fetch('/api/job/' + jobId + '/result');
-            const resultData = await resultResponse.json();
-            
-            if (resultData.success && resultData.result) {
-              const result = resultData.result;
-              const riskClass = result.risk_level || 'unknown';
-              
-              document.getElementById('results').innerHTML = 
-                '<h3>Analysis Complete</h3>' +
-                '<strong>Job ID:</strong> ' + jobId + '\\n' +
-                '<strong>Package:</strong> ' + (result.metadata?.name || 'Unknown') + '@' + (result.metadata?.version || 'Unknown') + '\\n' +
-                '<strong>Risk Level:</strong> <span class="' + riskClass + '">' + (result.riskLevel || 'UNKNOWN').toUpperCase() + '</span>\\n' +
-                '<strong>Score:</strong> ' + (result.overallScore || 0) + '/100\\n' +
-                '<strong>Processing Time:</strong> ' + (resultData.processingTime || 0) + 'ms\\n' +
-                '<strong>Cache Hit:</strong> ' + (result.cacheHit ? 'Yes' : 'No') + '\\n\\n' +
-                '<strong>Static Analysis:</strong>\\n' +
-                JSON.stringify(result.stages?.static || {}, null, 2) + '\\n\\n' +
-                '<strong>AI Analysis:</strong>\\n' +
-                JSON.stringify(result.stages?.llm || {}, null, 2);
-            } else {
-              document.getElementById('results').innerHTML = 
-                '<span class="error">Error fetching results: ' + (resultData.error || 'Unknown error') + '</span>';
-            }
-          } catch (error) {
-            document.getElementById('results').innerHTML = 
-              '<span class="error">Error fetching results: ' + error.message + '</span>';
-          }
-        }
-      </script>
-    </body>
-    </html>
-  `);
+app.post('/api/cache/clear-all', async (req, res) => {
+  try {
+    logger.apiRequest('POST', '/api/cache/clear-all', req.ip);
+    
+    const allCacheKeys = Object.values(CACHE_KEYS);
+    const results = await Promise.all(
+      allCacheKeys.map(async (key) => {
+        const deleted = await redisCache.del(key);
+        return { key, deleted };
+      })
+    );
+    
+    // Also clear activity cache with different hours
+    const activityKeys = await redisCache.keys(`${CACHE_KEYS.RECENT_ACTIVITY}:*`);
+    const activityResults = await Promise.all(
+      activityKeys.map(async (key) => {
+        const deleted = await redisCache.del(key);
+        return { key, deleted };
+      })
+    );
+    
+    res.json({
+      success: true,
+      results: [...results, ...activityResults],
+      timestamp: Date.now()
+    });
+  } catch (error: any) {
+    logger.apiError('POST', '/api/cache/clear-all', error, req.ip);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.get('/api/cache/status', async (req, res) => {
+  try {
+    logger.apiRequest('GET', '/api/cache/status', req.ip);
+    
+    const cacheStatus = await Promise.all(
+      Object.entries(CACHE_KEYS).map(async ([name, key]) => {
+        const exists = await redisCache.exists(key);
+        return { name, key, exists };
+      })
+    );
+    
+    // Check activity cache variants
+    const activityKeys = await redisCache.keys(`${CACHE_KEYS.RECENT_ACTIVITY}:*`);
+    const activityStatus = await Promise.all(
+      activityKeys.map(async (key) => {
+        const exists = await redisCache.exists(key);
+        return { name: 'RECENT_ACTIVITY_VARIANT', key, exists };
+      })
+    );
+    
+    res.json({
+      success: true,
+      cacheStatus: [...cacheStatus, ...activityStatus],
+      timestamp: Date.now()
+    });
+  } catch (error: any) {
+    logger.apiError('GET', '/api/cache/status', error, req.ip);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Serve static files from frontend build
+const frontendPath = path.join(__dirname, '..', 'dist', 'frontend');
+app.use(express.static(frontendPath));
+
+// Serve React app for all non-API routes
+app.use((req, res, next) => {
+  // Skip API routes and admin routes
+  if (req.path.startsWith('/api/') || req.path.startsWith('/admin/')) {
+    return next();
+  }
+  
+  // Serve React app for all other routes
+  res.sendFile(path.join(frontendPath, 'index.html'));
 });
 
 // Initialize Redis connection
@@ -487,27 +814,92 @@ async function initializeServices() {
 }
 
 // Graceful shutdown
-process.on('SIGTERM', async () => {
-  logger.info('SIGTERM received, shutting down gracefully');
+async function gracefulShutdown() {
+  logger.info('Shutting down gracefully...');
+  
+  // Clear periodic updates
+  if (statsUpdateInterval) {
+    clearInterval(statsUpdateInterval);
+  }
+  
+  // Close WebSocket connections
+  io.close();
+  
+  // Close Redis connection
   await closeRedisConnection();
-  process.exit(0);
-});
+  
+  // Close HTTP server
+  server.close(() => {
+    logger.info('Server closed');
+    process.exit(0);
+  });
+}
 
-process.on('SIGINT', async () => {
-  logger.info('SIGINT received, shutting down gracefully');
-  await closeRedisConnection();
-  process.exit(0);
-});
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
+
+// Periodic stats update for real-time WebSocket broadcasting
+let statsUpdateInterval: NodeJS.Timeout;
+
+async function startPeriodicStatsUpdates() {
+  const updateStats = async () => {
+    try {
+      // Clear cache to force fresh data
+      await redisCache.del(CACHE_KEYS.SYSTEM_STATS);
+      await redisCache.del(CACHE_KEYS.QUEUE_STATS);
+      
+      // Fetch fresh stats
+      const [systemStats, queueStats] = await Promise.all([
+        convexClient.query(api.stats.getSystemStats),
+        (async () => {
+          const [waiting, active] = await Promise.all([
+            analysisQueue.getWaiting(),
+            analysisQueue.getActive()
+          ]);
+          return {
+            currentlyAnalyzing: active.length,
+            queueDepth: waiting.length,
+            timestamp: Date.now()
+          };
+        })()
+      ]);
+      
+      // Cache the fresh data
+      await Promise.all([
+        redisCache.set(CACHE_KEYS.SYSTEM_STATS, systemStats, CACHE_TTL.SYSTEM_STATS),
+        redisCache.set(CACHE_KEYS.QUEUE_STATS, queueStats, CACHE_TTL.QUEUE_STATS)
+      ]);
+      
+      // Broadcast to WebSocket clients
+      broadcastStatsUpdate(systemStats);
+      io.to('stats-updates').emit('queue-update', queueStats);
+      
+      logger.info('Periodic stats update completed');
+    } catch (error) {
+      logger.error('Error during periodic stats update:', error);
+    }
+  };
+  
+  // Update every 30 seconds
+  statsUpdateInterval = setInterval(updateStats, 30000);
+  
+  // Initial update
+  await updateStats();
+}
 
 // Start server
 async function startServer() {
   await initializeServices();
   
-  app.listen(port, () => {
+  server.listen(port, () => {
     logger.info(`NodeWatch server running at http://localhost:${port}`);
+    logger.info(`WebSocket server enabled for real-time updates`);
     logger.info(`Environment: ${config.nodeEnv}`);
     logger.info(`Log level: ${config.logLevel}`);
   });
+  
+  // Start periodic stats updates
+  await startPeriodicStatsUpdates();
 }
 
 // Only start server if this file is run directly
