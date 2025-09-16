@@ -69,7 +69,35 @@ const CACHE_TTL = {
   QUEUE_STATS: 15, // 15 seconds for queue stats
 } as const;
 
-app.use(cors());
+// CORS configuration for production
+const corsOptions = {
+  origin: function (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'http://localhost:3001', 
+      'http://localhost:5173',
+      // Add your production URLs here
+      process.env.FRONTEND_URL,
+      // Add custom domains
+      'https://nodewatch.dev',
+      'https://www.nodewatch.dev'
+    ].filter(Boolean);
+    
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Admin dashboard routes

@@ -5,8 +5,12 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
-    "build": "npm run build:frontend && tsc",
+    "build": "npm run build:frontend && npm run build:backend",
     "build:frontend": "webpack --mode=production",
+    "build:backend": "tsc",
+    "build:vercel": "npm run build:frontend",
+    "start:production": "node dist/index.js",
+    "worker:production": "node dist/worker.js",
     "dev:frontend": "webpack serve --mode=development",
     "dev:full": "npm run build && npm run dev",
     "test": "jest",
@@ -29,7 +33,12 @@
     "docker:prod": "./scripts/deploy.sh",
     "docker:stop": "./scripts/deploy.sh stop",
     "docker:logs": "./scripts/deploy.sh logs",
-    "docker:clean": "./scripts/deploy.sh clean"
+    "docker:clean": "./scripts/deploy.sh clean",
+    "deploy:vercel": "vercel --prod",
+    "deploy:railway": "railway up",
+    "deploy:convex": "npx convex deploy",
+    "deploy:production": "node scripts/deploy-production.js",
+    "deploy:all": "npm run deploy:convex && npm run deploy:railway && npm run deploy:vercel"
   },
   "keywords": [],
   "author": "",
