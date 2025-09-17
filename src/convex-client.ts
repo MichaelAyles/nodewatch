@@ -17,13 +17,13 @@ export async function savePackageAnalysis(
   analysisResult: any
 ) {
   // First, create or update the package record
-  const packageId = await convexClient.mutation(api.packages.submitPackage, {
+  const packageId = await convexClient.mutation(api.packages.submitPackage as any, {
     name: packageName,
     version: version,
   });
 
   // Update package with analysis data
-  await convexClient.mutation(api.packages.updatePackageStatus, {
+  await convexClient.mutation(api.packages.updatePackageStatus as any, {
     id: packageId,
     status: "completed",
     registry_data: {
@@ -37,7 +37,7 @@ export async function savePackageAnalysis(
 }
 
 export async function getPackageByName(name: string) {
-  const packages = await convexClient.query(api.packages.listPackages, {
+  const packages = await convexClient.query(api.packages.listPackages as any, {
     limit: 1,
   });
   
@@ -45,7 +45,7 @@ export async function getPackageByName(name: string) {
 }
 
 export async function listRecentPackages(limit = 10) {
-  return await convexClient.query(api.packages.listPackages, {
+  return await convexClient.query(api.packages.listPackages as any, {
     limit,
   });
 }

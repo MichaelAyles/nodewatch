@@ -80,7 +80,7 @@ export const getPackageFiles = query({
       .withIndex("by_package", (q) => q.eq("package_id", args.package_id))
       .collect();
 
-    const results = [];
+    const results: any[] = [];
     for (const pf of packageFiles) {
       const fileHash = await ctx.db.get(pf.file_hash_id);
       if (fileHash) {

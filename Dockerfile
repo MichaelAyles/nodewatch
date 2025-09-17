@@ -1,50 +1,29 @@
-# Multi-stage build for NodeWatch
-FROM node:18-alpine AS builder
+# Use Node.js 20
+FROM node:20-alpine
 
 # Install build dependencies
 RUN apk add --no-cache python3 make g++
 
+# Set working directory
 WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
-COPY tsconfig.json ./
 
 # Install dependencies
-RUN npm ci --only=production
+RUN npm ci
 
 # Copy source code
-COPY src/ ./src/
-COPY convex/ ./convex/
+COPY . .
 
-# Build the application
-RUN npm run build
+# Build the backend (with verbose output)
+RUN npm run build:backend || (echo "Build failed, checking files:" && ls -la && exit 1)
 
-# Production stage
-FROM node:18-alpine AS production
+# Verify build output
+RUN ls -la dist/ || (echo "No dist directory found" && exit 1)
 
-# Install runtime dependencies
-RUN apk add --no-cache \
-    docker-cli \
-    curl \
-    ca-certificates
-
-# Create app user
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nodewatch -u 1001
-
-WORKDIR /app
-
-# Copy built application
-COPY --from=builder --chown=nodewatch:nodejs /app/dist ./dist
-COPY --from=builder --chown=nodewatch:nodejs /app/node_modules ./node_modules
-COPY --from=builder --chown=nodewatch:nodejs /app/package.json ./
-
-# Create cache directory
-RUN mkdir -p /app/cache && chown nodewatch:nodejs /app/cache
-
-# Switch to non-root user
-USER nodewatch
+# Remove dev dependencies
+RUN npm prune --production
 
 # Expose port
 EXPOSE 3000

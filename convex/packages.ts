@@ -139,7 +139,7 @@ export const findPackagesByFileHash = query({
       .withIndex("by_file_hash", (q) => q.eq("file_hash_id", fileHashRecord._id))
       .collect();
     
-    const packages = [];
+    const packages: any[] = [];
     for (const pf of packageFiles) {
       const pkg = await ctx.db.get(pf.package_id);
       if (pkg) packages.push(pkg);
