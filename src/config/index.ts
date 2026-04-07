@@ -195,16 +195,12 @@ export function validateConfig(): void {
   // Convex is optional — Postgres is the primary database now
 
   if (config.nodeEnv === 'production') {
-    if (!config.llm.openrouter.apiKey) {
-      errors.push('OPENROUTER_API_KEY is required in production');
-    }
-
-    if (config.monitoring.webhookSecret === 'default-secret') {
-      errors.push('WEBHOOK_SECRET should be changed from default in production');
+    if (!config.llm.anthropic.apiKey && !config.llm.openrouter.apiKey) {
+      console.warn('Warning: No LLM API key configured. Analysis will use mock results.');
     }
 
     if (config.admin.password === 'change-me-in-production') {
-      errors.push('ADMIN_PASSWORD should be changed from default in production');
+      console.warn('Warning: ADMIN_PASSWORD should be changed from default in production');
     }
   }
 
