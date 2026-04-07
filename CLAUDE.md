@@ -17,13 +17,14 @@ NodeWatch is an npm package malware detection system. It fetches packages from t
 - **Cost tracker** (`src/services/cost-tracker.ts`) — LLM cost management with budget alerts. Ready but nothing real to track yet.
 - **Tests** — 58 tests in `src/__tests__/`, Jest with ts-jest.
 
+### Partially Working
+- **LLM analyzer** (`src/analyzers/llm-analyzer.ts`) — uses `@anthropic-ai/sdk` (Claude Sonnet 4.6). Builds prompts from flagged code, parses structured JSON responses. Falls back to mock analysis when `ANTHROPIC_API_KEY` isn't set. Cost-optimized: only sends top 5 suspicious files.
+- **Convex integration** — schema defined in `convex/schema.ts` (14 tables), mutations/queries in `convex/*.ts`. `pipeline-with-db.ts` is wired up with real Convex calls (submitPackage, saveAnalysisResult, saveRiskScore, updatePackageStatus). Degrades gracefully without `CONVEX_URL`.
+- **Frontend** (`src/frontend/`) — React 19 soft modern design. Search, job progress, score ring, results view, system stats. Needs a running backend to be useful.
+
 ### Not Working / Stub
-- **LLM analyzer** (`src/analyzers/llm-analyzer.ts`) — mock implementation. Returns fabricated results based on static analysis output. No real API calls.
 - **Dynamic sandbox analysis** — Dockerode is a dependency but there's zero execution code. No packages are ever actually run.
-- **Convex integration** — schema defined in `convex/schema.ts` (14 tables), mutations/queries in `convex/*.ts`, but the pipeline has TODO comments where DB calls should go. `pipeline-with-db.ts` exists but isn't wired up.
-- **Frontend** (`src/frontend/`) — React 19 placeholder. Needs complete rebuild. Do not try to fix it, build fresh.
 - **Deployment** — Railway never worked. Vercel is frontend-only. Nothing is running in production.
-- **`semgrep` npm dependency** — this is NOT the real Semgrep (which is a Python binary). It's a placeholder v0.0.1 package. Dead weight.
 - **`generate:convex` script** — no-op, just echoes a string.
 
 ## Development Commands
@@ -53,13 +54,14 @@ Worker Process (separate)
         ├── 1. Fetch package from NPM registry
         ├── 2. Extract and hash contents
         ├── 3. Static analysis (40+ patterns)
-        ├── 4. LLM analysis (MOCK - not implemented)
+        ├── 4. LLM analysis (Claude API when ANTHROPIC_API_KEY set, mock otherwise)
         └── 5. Risk scoring (0-100, safe/low/medium/high/critical)
+              Weights: 40% static / 60% LLM when real, 100% static when mock
 ```
 
 ## Key Technical Notes
 
-- **`@types/*` packages are incorrectly in `dependencies`** instead of `devDependencies`. Should be fixed.
+- **`@types/*` packages are in `devDependencies`** where they belong.
 - **Express 5** is used (was bleeding edge when the project started, more stable now).
 - **`src/index.ts` is ~1030 lines** — the API server. It's large but organized by route groups. Consider splitting if adding more routes.
 - **Redis is required** — the job queue won't work without it. The API server has fallback mock data for stats endpoints, but analysis requires Redis.
@@ -92,9 +94,6 @@ Tests cover: static analyzer patterns, deobfuscation, content hashing, config va
 
 ## What Needs To Happen Next
 
-1. **LLM integration** — replace mock with real Claude API calls. Only send pre-flagged suspicious code to keep costs down.
-2. **Database persistence** — wire up Convex mutations in the pipeline so results are actually saved.
-3. **Frontend rebuild** — start fresh, the current one is a shell.
-4. **Dynamic analysis** — implement actual sandbox execution in Docker containers.
-5. **Clean up dependencies** — move `@types/*` to devDependencies, remove dead `semgrep` package.
-6. **Deployment** — pick a platform and actually get it running.
+1. **Dynamic analysis** — implement actual sandbox execution in Docker containers.
+2. **Deployment** — pick a platform and actually get it running.
+3. **End-to-end testing** — run full analysis with API key and Convex URL configured, verify results persist.
