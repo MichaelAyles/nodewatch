@@ -4,12 +4,11 @@ import path from 'path';
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { Queue } from 'bullmq';
-import { convexClient } from './convex-client';
+import { db } from './database/postgres-client';
 import { config } from './config';
 import { logger } from './utils/logger';
 import { getRedisClient, closeRedisConnection, redisCache } from './utils/redis';
 import adminDashboard from './admin/dashboard';
-import { api } from '../convex/_generated/api';
 
 const app = express();
 const server = createServer(app);
@@ -249,8 +248,7 @@ app.get('/api/package/:name', async (req, res) => {
   const { name } = req.params;
   
   try {
-    // TODO: Replace with proper Convex API call once generated
-    const result = null; // await convexClient.query(api.analysis.getPackageByName, { name });
+    const result = await db.getPackageByName(name);
     
     if (result) {
       res.json({
@@ -274,8 +272,7 @@ app.get('/api/package/:name', async (req, res) => {
 // List recently analyzed packages
 app.get('/api/packages/recent', async (req, res) => {
   try {
-    // TODO: Replace with proper Convex API call once generated
-    const packages: any[] = []; // await convexClient.query(api.packages.listPackages, { limit: 20 });
+    const packages = await db.listPackages({ limit: 20 });
     
     res.json({
       success: true,
@@ -305,28 +302,45 @@ app.get('/api/stats', async (req, res) => {
       });
     }
     
-    // Fetch fresh data from Convex or use fallback
+    // Fetch fresh data from Postgres or use fallback
     let stats;
-    if (process.env.RAILWAY_ENVIRONMENT) {
-      // Railway deployment - use fallback stats
+    try {
+      const cacheStats = await db.getCacheStats();
+      const packages = await db.listPackages({ limit: 1 });
       stats = {
-        totalPackagesAnalyzed: 125847,
-        malwareDetected: 342,
-        currentlyAnalyzing: 12,
-        queueDepth: 45,
-        analysisRate: 156,
-        packagesAnalyzedToday: 1247,
-        recentMalwareCount: 8,
-        successRate: 98,
-        cacheHitRate: 67,
-        lastScanTime: Date.now() - 300000,
-        completedPackages: 124503,
-        failedPackages: 1344,
-        pendingPackages: 57,
+        totalPackagesAnalyzed: cacheStats?.packages_analyzed || 0,
+        malwareDetected: 0,
+        currentlyAnalyzing: 0,
+        queueDepth: 0,
+        analysisRate: 0,
+        packagesAnalyzedToday: cacheStats?.packages_analyzed || 0,
+        recentMalwareCount: 0,
+        successRate: cacheStats?.cache_hits && cacheStats?.cache_misses
+          ? Math.round((cacheStats.cache_hits / (cacheStats.cache_hits + cacheStats.cache_misses)) * 100) : 0,
+        cacheHitRate: cacheStats?.cache_hits && cacheStats?.cache_misses
+          ? Math.round((cacheStats.cache_hits / (cacheStats.cache_hits + cacheStats.cache_misses)) * 100) : 0,
+        lastScanTime: Date.now(),
+        completedPackages: cacheStats?.packages_analyzed || 0,
+        failedPackages: 0,
+        pendingPackages: 0,
       };
-    } else {
-      // Local/Vercel deployment - use real Convex
-      stats = await convexClient.query(api.stats.getSystemStats as any);
+    } catch (dbError) {
+      logger.warn('Failed to fetch stats from Postgres, using fallback', dbError);
+      stats = {
+        totalPackagesAnalyzed: 0,
+        malwareDetected: 0,
+        currentlyAnalyzing: 0,
+        queueDepth: 0,
+        analysisRate: 0,
+        packagesAnalyzedToday: 0,
+        recentMalwareCount: 0,
+        successRate: 0,
+        cacheHitRate: 0,
+        lastScanTime: Date.now(),
+        completedPackages: 0,
+        failedPackages: 0,
+        pendingPackages: 0,
+      };
     }
     
     // Cache the results
@@ -382,25 +396,28 @@ app.get('/api/stats/activity', async (req, res) => {
       });
     }
     
-    // Fetch fresh data from Convex or use fallback
+    // Fetch fresh data from Postgres or use fallback
     let activity;
-    if (process.env.RAILWAY_ENVIRONMENT) {
-      // Railway deployment - use fallback activity
+    try {
+      const recentPackages = await db.listPackages({ limit: 10 });
       activity = {
-        recentPackages: [
-          { id: '1', name: 'lodash', version: '4.17.21', status: 'completed', createdAt: Date.now() - 60000 },
-          { id: '2', name: 'react', version: '18.2.0', status: 'analyzing', createdAt: Date.now() - 120000 },
-        ],
-        recentAnalyses: [
-          { id: '1', packageId: '1', stage: 'static', completedAt: Date.now() - 30000, processingTime: 15000, cacheHit: false },
-        ],
-        recentThreats: [
-          { id: '1', packageId: '3', overallScore: 85, riskSignals: [], calculatedAt: Date.now() - 180000 },
-        ],
+        recentPackages: recentPackages.map((p: any) => ({
+          id: p.id,
+          name: p.name,
+          version: p.version,
+          status: p.analysis_status || 'unknown',
+          createdAt: p.created_at ? new Date(p.created_at).getTime() : Date.now(),
+        })),
+        recentAnalyses: [],
+        recentThreats: [],
       };
-    } else {
-      // Local/Vercel deployment - use real Convex
-      activity = await convexClient.query(api.stats.getRecentActivity as any, { hours });
+    } catch (dbError) {
+      logger.warn('Failed to fetch activity from Postgres, using fallback', dbError);
+      activity = {
+        recentPackages: [],
+        recentAnalyses: [],
+        recentThreats: [],
+      };
     }
     
     // Cache the results
@@ -452,32 +469,53 @@ app.get('/api/health/metrics', async (req, res) => {
       });
     }
     
-    // Fetch fresh data from Convex or use fallback
+    // Fetch fresh data from Postgres or use fallback
     let metrics;
-    if (process.env.RAILWAY_ENVIRONMENT) {
-      // Railway deployment - use fallback metrics
+    try {
+      const cacheStats = await db.getCacheStats();
+      const dedupStats = await db.getDeduplicationStats();
+      const totalPackages = dedupStats?.total_packages || 0;
+      const totalAnalyzed = cacheStats?.packages_analyzed || 0;
       metrics = {
-        safePackagePercentage: 92,
-        threatDetectionRate: 3,
-        analysisCoverage: 87,
-        averageRiskScore: 23,
+        safePackagePercentage: totalAnalyzed > 0 ? 100 : 0,
+        threatDetectionRate: 0,
+        analysisCoverage: totalPackages > 0 ? Math.round((totalAnalyzed / totalPackages) * 100) : 0,
+        averageRiskScore: 0,
         weeklyChange: {
-          safePackages: 2.1,
-          threatsDetected: -0.8,
-          newPackagesAnalyzed: 12.5,
+          safePackages: 0,
+          threatsDetected: 0,
+          newPackagesAnalyzed: 0,
         },
-        totalPackages: 125847,
-        totalAnalyzed: 109487,
-        totalThreats: 342,
+        totalPackages,
+        totalAnalyzed,
+        totalThreats: 0,
         recentActivity: {
-          packagesThisWeek: 8734,
-          threatsThisWeek: 23,
-          analysesThisWeek: 7892,
+          packagesThisWeek: 0,
+          threatsThisWeek: 0,
+          analysesThisWeek: 0,
         },
       };
-    } else {
-      // Local/Vercel deployment - use real Convex
-      metrics = await convexClient.query(api.stats.getHealthMetrics as any);
+    } catch (dbError) {
+      logger.warn('Failed to fetch health metrics from Postgres, using fallback', dbError);
+      metrics = {
+        safePackagePercentage: 0,
+        threatDetectionRate: 0,
+        analysisCoverage: 0,
+        averageRiskScore: 0,
+        weeklyChange: {
+          safePackages: 0,
+          threatsDetected: 0,
+          newPackagesAnalyzed: 0,
+        },
+        totalPackages: 0,
+        totalAnalyzed: 0,
+        totalThreats: 0,
+        recentActivity: {
+          packagesThisWeek: 0,
+          threatsThisWeek: 0,
+          analysesThisWeek: 0,
+        },
+      };
     }
     
     // Cache the results
@@ -517,8 +555,7 @@ app.get('/api/findings/recent', async (req, res) => {
     const limit = parseInt(req.query.limit as string) || 6;
     logger.apiRequest('GET', '/api/findings/recent', req.ip);
     
-    // TODO: Replace with actual Convex API call
-    // const findings = await convexClient.query(api.findings.getRecentFindings, { limit });
+    // TODO: Replace with actual Postgres query for findings
     
     // Mock data for now
     const mockFindings = [
@@ -587,8 +624,7 @@ app.get('/api/packages/top', async (req, res) => {
     const limit = parseInt(req.query.limit as string) || 12;
     logger.apiRequest('GET', '/api/packages/top', req.ip);
     
-    // TODO: Replace with actual Convex API call
-    // const packages = await convexClient.query(api.packages.getTopPackages, { limit });
+    // TODO: Replace with actual Postgres query for top packages
     
     // Mock data for now
     const mockPackages = [
@@ -674,24 +710,32 @@ app.get('/api/queue/stats', async (req, res) => {
       analysisQueue.getFailed()
     ]);
     
-    // Get additional queue metrics from Convex or use fallback
-    let convexQueueStats;
-    if (process.env.RAILWAY_ENVIRONMENT) {
-      // Railway deployment - use fallback queue stats
-      convexQueueStats = {
+    // Get additional queue metrics from Postgres or use fallback
+    let dbQueueStats;
+    try {
+      const cacheStats = await db.getCacheStats();
+      dbQueueStats = {
+        waiting: 0,
+        active: 0,
+        completed: cacheStats?.packages_analyzed || 0,
+        failed: 0,
+        total: cacheStats?.packages_analyzed || 0,
+        avgProcessingTimeMs: cacheStats?.avg_processing_time || 0,
+        estimatedQueueTimeMs: 0,
+      };
+    } catch (dbError) {
+      logger.warn('Failed to fetch queue stats from Postgres, using fallback', dbError);
+      dbQueueStats = {
         waiting: 0,
         active: 0,
         completed: 0,
         failed: 0,
         total: 0,
-        avgProcessingTimeMs: 30000,
+        avgProcessingTimeMs: 0,
         estimatedQueueTimeMs: 0,
       };
-    } else {
-      // Local/Vercel deployment - use real Convex
-      convexQueueStats = await convexClient.query(api.stats.getQueueStatus as any);
     }
-    
+
     const queueStats = {
       // BullMQ stats
       bullmq: {
@@ -701,8 +745,8 @@ app.get('/api/queue/stats', async (req, res) => {
         failed: failed.length,
         total: waiting.length + active.length + completed.length + failed.length
       },
-      // Convex stats
-      convex: convexQueueStats,
+      // Database stats
+      database: dbQueueStats,
       // Combined metrics
       currentlyAnalyzing: active.length,
       queueDepth: waiting.length,
@@ -957,21 +1001,34 @@ async function startPeriodicStatsUpdates() {
       
       // Fetch fresh stats
       const [systemStats, queueStats] = await Promise.all([
-        process.env.RAILWAY_ENVIRONMENT ? Promise.resolve({
-          totalPackagesAnalyzed: 125847,
-          malwareDetected: 342,
-          currentlyAnalyzing: 12,
-          queueDepth: 45,
-          analysisRate: 156,
-          packagesAnalyzedToday: 1247,
-          recentMalwareCount: 8,
-          successRate: 98,
-          cacheHitRate: 67,
-          lastScanTime: Date.now() - 300000,
-          completedPackages: 124503,
-          failedPackages: 1344,
-          pendingPackages: 57,
-        }) : convexClient.query(api.stats.getSystemStats as any),
+        (async () => {
+          try {
+            const cacheStats = await db.getCacheStats();
+            return {
+              totalPackagesAnalyzed: cacheStats?.packages_analyzed || 0,
+              malwareDetected: 0,
+              currentlyAnalyzing: 0,
+              queueDepth: 0,
+              analysisRate: 0,
+              packagesAnalyzedToday: cacheStats?.packages_analyzed || 0,
+              recentMalwareCount: 0,
+              successRate: 0,
+              cacheHitRate: cacheStats?.cache_hits && cacheStats?.cache_misses
+                ? Math.round((cacheStats.cache_hits / (cacheStats.cache_hits + cacheStats.cache_misses)) * 100) : 0,
+              lastScanTime: Date.now(),
+              completedPackages: cacheStats?.packages_analyzed || 0,
+              failedPackages: 0,
+              pendingPackages: 0,
+            };
+          } catch {
+            return {
+              totalPackagesAnalyzed: 0, malwareDetected: 0, currentlyAnalyzing: 0,
+              queueDepth: 0, analysisRate: 0, packagesAnalyzedToday: 0,
+              recentMalwareCount: 0, successRate: 0, cacheHitRate: 0,
+              lastScanTime: Date.now(), completedPackages: 0, failedPackages: 0, pendingPackages: 0,
+            };
+          }
+        })(),
         (async () => {
           const [waiting, active] = await Promise.all([
             analysisQueue.getWaiting(),

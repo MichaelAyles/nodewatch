@@ -1,5 +1,5 @@
 import express from 'express';
-import { convexClient } from '../convex-client';
+import { db } from '../database/postgres-client';
 import { getRedisClient } from '../utils/redis';
 import { config } from '../config';
 import { logger } from '../utils/logger';
@@ -143,9 +143,7 @@ async function getQueueStatistics() {
 
 async function getCostStatistics() {
   try {
-    // TODO: Replace with actual Convex queries once generated
-    // const todayCosts = await convexClient.query(api.analytics.getTodayCosts);
-    // const monthCosts = await convexClient.query(api.analytics.getMonthCosts);
+    // TODO: Replace with actual Postgres queries for cost data
     
     // Mock data for now - replace with real queries
     const todayCosts = {
@@ -180,28 +178,33 @@ async function getCostStatistics() {
 
 async function getDatabaseStatistics() {
   try {
-    // TODO: Replace with actual Convex queries
-    // const packageCount = await convexClient.query(api.packages.count);
-    // const analysisCount = await convexClient.query(api.analysis.count);
-    
-    // Mock data for now
+    const dedupStats = await db.getDeduplicationStats();
+    const cacheStats = await db.getCacheStats();
+    const totalPackages = dedupStats?.total_packages || 0;
+    const uniqueFiles = dedupStats?.unique_files || 0;
+    const duplicatedFiles = dedupStats?.duplicated_files || 0;
+
     return {
       packages: {
-        total: 1247,
-        analyzed: 1089,
-        pending: 158,
-        failed: 23
+        total: totalPackages,
+        analyzed: cacheStats?.packages_analyzed || 0,
+        pending: 0,
+        failed: 0
       },
       files: {
-        total: 45623,
-        unique: 34567,
-        duplicates: 11056,
-        deduplicationRate: 24.2
+        total: uniqueFiles + duplicatedFiles,
+        unique: uniqueFiles,
+        duplicates: duplicatedFiles,
+        deduplicationRate: (uniqueFiles + duplicatedFiles) > 0
+          ? Math.round((duplicatedFiles / (uniqueFiles + duplicatedFiles)) * 1000) / 10
+          : 0
       },
       cache: {
-        hitRate: 78.5,
-        totalHits: 8934,
-        totalMisses: 2456
+        hitRate: cacheStats?.cache_hits && cacheStats?.cache_misses
+          ? Math.round((cacheStats.cache_hits / (cacheStats.cache_hits + cacheStats.cache_misses)) * 1000) / 10
+          : 0,
+        totalHits: cacheStats?.cache_hits || 0,
+        totalMisses: cacheStats?.cache_misses || 0
       }
     };
   } catch (error) {
@@ -290,12 +293,12 @@ async function getSystemHealth() {
     // Test Redis connection
     await redis.ping();
     
-    // Test Convex connection
-    // const convexHealth = await convexClient.query(api.system.health);
-    
+    // Test Postgres connection
+    const dbHealthy = await db.healthCheck();
+
     return {
       redis: { status: 'healthy', latency: 1 },
-      convex: { status: 'healthy', latency: 45 },
+      postgres: { status: dbHealthy ? 'healthy' : 'unhealthy' },
       workers: { active: 2, healthy: 2 },
       api: { status: 'healthy', uptime: process.uptime() }
     };
@@ -303,7 +306,7 @@ async function getSystemHealth() {
     logger.error('Health check failed', error);
     return {
       redis: { status: 'error', error: error instanceof Error ? error.message : 'Unknown error' },
-      convex: { status: 'unknown' },
+      postgres: { status: 'unknown' },
       workers: { status: 'unknown' },
       api: { status: 'healthy', uptime: process.uptime() }
     };

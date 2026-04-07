@@ -1,4 +1,3 @@
-import { convexClient } from '../convex-client';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 
@@ -93,7 +92,7 @@ export class CostTracker {
     
     const entry: CostEntry = {
       type: 'storage',
-      provider: 'convex',
+      provider: 'postgres',
       operation: params.operation,
       cost,
       currency: 'USD',
@@ -148,8 +147,7 @@ export class CostTracker {
   private async recordCost(entry: CostEntry) {
     try {
       // Store in database
-      // TODO: Replace with actual Convex mutation once generated
-      // await convexClient.mutation(api.costs.record, entry);
+      // TODO: Replace with actual Postgres insert for cost tracking
 
       // Update running totals
       this.dailyTotal += entry.cost;
@@ -205,15 +203,7 @@ export class CostTracker {
 
   private async loadTotals() {
     try {
-      // TODO: Load current day/month totals from database
-      // const today = new Date().toDateString();
-      // const thisMonth = new Date().toISOString().slice(0, 7);
-      
-      // const dailyData = await convexClient.query(api.costs.getDailyTotal, { date: today });
-      // const monthlyData = await convexClient.query(api.costs.getMonthlyTotal, { month: thisMonth });
-      
-      // this.dailyTotal = dailyData?.total || 0;
-      // this.monthlyTotal = monthlyData?.total || 0;
+      // TODO: Load current day/month totals from Postgres
     } catch (error) {
       logger.error('Failed to load cost totals', error);
     }
