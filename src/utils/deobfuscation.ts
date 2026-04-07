@@ -97,7 +97,7 @@ export class DeobfuscationEngine {
     const results: EncodedString[] = [];
     
     // Base64 pattern: look for base64-like strings in quotes or standalone
-    const base64Pattern = /([A-Za-z0-9+/]{12,}={0,2})/g;
+    const base64Pattern = /([A-Za-z0-9+/]{4,}={0,2})/g;
     
     let match;
     while ((match = base64Pattern.exec(content)) !== null) {
@@ -147,7 +147,8 @@ export class DeobfuscationEngine {
       let match;
       while ((match = pattern.exec(content)) !== null) {
         const fullMatch = match[0];
-        let candidate = match[1] || match[0]; // Extract content, fallback to full match
+        // For \x patterns, match[1] only captures the last repetition, so use match[0]
+        let candidate = fullMatch.includes('\\x') ? match[0] : (match[1] || match[0]);
         
         try {
           let hexString = candidate;
@@ -192,7 +193,7 @@ export class DeobfuscationEngine {
     const results: EncodedString[] = [];
     
     // Unicode escape patterns - look for sequences in quotes or standalone
-    const unicodePattern = /((?:\\u[0-9a-fA-F]{4}){3,})/g;
+    const unicodePattern = /((?:\\u[0-9a-fA-F]{4}){1,})/g;
     
     let match;
     while ((match = unicodePattern.exec(content)) !== null) {
@@ -227,8 +228,8 @@ export class DeobfuscationEngine {
   private detectUrlEncoding(content: string): EncodedString[] {
     const results: EncodedString[] = [];
     
-    // URL encoding pattern: %XX sequences
-    const urlPattern = /(?:%[0-9a-fA-F]{2}){3,}/g;
+    // URL encoding pattern: sequences containing %XX mixed with plain text
+    const urlPattern = /(?:%[0-9a-fA-F]{2}[^%"'\s]*){3,}/g;
     
     let match;
     while ((match = urlPattern.exec(content)) !== null) {

@@ -317,12 +317,12 @@ export class EnhancedStaticAnalyzer {
         }
       }
 
-      // Legacy obfuscation analysis (for patterns not caught by new engine)
+      // Legacy obfuscation analysis (supplements deobfuscation engine)
       const legacyObfuscationAnalysis = this.analyzeObfuscation(content);
-      if (legacyObfuscationAnalysis.isObfuscated && deobfuscationResult.confidence < 0.3) {
+      if (legacyObfuscationAnalysis.isObfuscated) {
         result.riskIndicators.has_obfuscated_code = true;
         result.obfuscationScore = Math.max(result.obfuscationScore, legacyObfuscationAnalysis.confidence * 100);
-        
+
         result.suspiciousPatterns.push({
           type: 'obfuscation',
           file: filePath,

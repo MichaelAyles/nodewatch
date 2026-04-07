@@ -68,7 +68,8 @@ describe('EnhancedStaticAnalyzer', () => {
 
   describe('Obfuscation Detection', () => {
     test('should detect string encoding obfuscation', async () => {
-      const obfuscatedCode = 'var a = "\\x48\\x65\\x6c\\x6c\\x6f"; eval(a);';
+      // Use String.raw to preserve literal backslash-x sequences
+      const obfuscatedCode = String.raw`var a = "\x48\x65\x6c\x6c\x6f"; eval(a);`;
       const files = new Map([['obfuscated.js', obfuscatedCode]]);
 
       const result = await analyzer.analyze(files);
