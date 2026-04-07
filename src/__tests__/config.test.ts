@@ -7,9 +7,8 @@ describe('Configuration', () => {
     expect(config.nodeEnv).toBeDefined();
   });
 
-  test('should have required convex configuration', () => {
-    expect(config.convex.url).toBeDefined();
-    expect(config.convex.deployment).toBeDefined();
+  test('should have database configuration', () => {
+    expect(config.database).toBeDefined();
   });
 
   test('should have redis configuration', () => {

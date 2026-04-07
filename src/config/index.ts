@@ -15,11 +15,6 @@ export interface Config {
     url: string;
   };
 
-  convex: {
-    url: string;
-    deployment: string;
-  };
-
   // Redis Configuration
   redis: {
     url: string;
@@ -123,11 +118,6 @@ export const config: Config = {
     url: getEnvVar('DATABASE_URL', ''),
   },
 
-  convex: {
-    url: getEnvVar('CONVEX_URL', nodeEnv === 'test' ? 'test-convex-url' : ''),
-    deployment: getEnvVar('CONVEX_DEPLOYMENT', nodeEnv === 'test' ? 'test-deployment' : ''),
-  },
-
   redis: {
     url: getEnvVar('REDIS_URL', 'redis://localhost:6379'),
     password: process.env.REDIS_PASSWORD,
@@ -192,7 +182,7 @@ export const config: Config = {
 export function validateConfig(): void {
   const errors: string[] = [];
 
-  // Convex is optional — Postgres is the primary database now
+  // Database validation is optional — pipeline degrades gracefully without it
 
   if (config.nodeEnv === 'production') {
     if (!config.llm.anthropic.apiKey && !config.llm.openrouter.apiKey) {

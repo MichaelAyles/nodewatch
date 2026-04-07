@@ -6,8 +6,7 @@ import { config } from '../config';
 process.env.NODE_ENV = 'test';
 process.env.LOG_LEVEL = 'error';
 process.env.REDIS_URL = 'redis://localhost:6379/1'; // Use different DB for tests
-process.env.CONVEX_URL = 'test-convex-url';
-process.env.CONVEX_DEPLOYMENT = 'test-deployment';
+process.env.DATABASE_URL = '';
 
 // Mock external services in tests
 jest.mock('@anthropic-ai/sdk');
