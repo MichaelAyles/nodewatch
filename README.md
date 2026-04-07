@@ -1,175 +1,113 @@
-# NodeWatch 🛡️
+# NodeWatch
 
-Real-time NPM package security analysis and malware detection platform.
+npm package malware detection through static analysis, deobfuscation, and (planned) LLM-powered code review. Analyzes packages for suspicious patterns, obfuscation, typosquatting, and supply chain attack indicators.
 
-## 🌐 Live Demo
+## Why
 
-- **Frontend**: https://nodewatch-frontend.vercel.app/
-- **Database**: Convex (Production)
-- **Backend**: Deployment in progress
+The Node ecosystem has a supply chain security problem. `ua-parser-js`, `colors`, `faker`, `event-stream`, `@pnpm/exe` — the list keeps growing. NodeWatch aims to catch malicious packages before they land in your `node_modules`.
 
-## 🚀 Features
+## What Works Today
 
-- **Real-time Security Analysis**: Instant package vulnerability scanning
-- **Malware Detection**: AI-powered threat identification
-- **Package Insights**: Comprehensive package analytics
-- **Live Dashboard**: Real-time statistics and monitoring
-- **Search & Discovery**: Advanced package search capabilities
-- **Admin Panel**: Management interface for system administration
+- **Static analysis engine** — 40+ detection patterns covering eval/Function constructor abuse, child_process spawning, network exfiltration, filesystem manipulation, prototype pollution, environment variable harvesting
+- **Obfuscation detection** — hex/unicode encoding, variable mangling, control flow obfuscation, packing, eval chains, entropy analysis
+- **Deobfuscation engine** — decodes base64, hex, unicode escapes, URL encoding; identifies suspicious strings in decoded content
+- **Typosquatting detection** — Levenshtein distance matching against popular packages, character substitution detection
+- **Package integrity checks** — suspicious install scripts, unexpected files, package.json inconsistencies
+- **NPM fetcher** — downloads and extracts packages from the registry, SHA-256 content hashing, smart file filtering
+- **Job queue architecture** — BullMQ/Redis for non-blocking analysis with Express API for job submission and status
+- **Worker process** — separate background workers for analysis, configurable concurrency
+- **Cost tracking** — built-in LLM cost management with budget alerts (ready for when LLM integration goes live)
+- **Test suite** — 58 tests covering core analyzers and utilities
 
-## 🛠️ Tech Stack
+## What Doesn't Work Yet
 
-### Frontend
-- **React 19** with TypeScript
-- **Webpack** for bundling
-- **WebSocket** for real-time updates
-- **Deployed on Vercel**
+- **LLM analysis** — interface defined, mock implementation only. No real API calls to Claude/OpenAI.
+- **Dynamic sandbox analysis** — schema exists, Dockerode is a dependency, but there's no execution code. Packages are never actually run.
+- **Database persistence** — Convex schema is defined with 14 tables, mutations/queries exist, but the pipeline has TODO comments where DB calls should be. Results aren't persisted.
+- **Frontend** — needs a complete rebuild. The existing React components are a placeholder landing page with incomplete data binding.
+- **Deployment** — Railway never worked. Vercel deployment is frontend-only (and the frontend is a shell). Nothing is actually running in production.
 
-### Backend
-- **Node.js 20** with Express
-- **TypeScript** for type safety
-- **WebSocket** for real-time communication
-- **Redis** for caching and job queues
-- **BullMQ** for background processing
-
-### Database
-- **Convex** for real-time data
-- **File deduplication** system
-- **Package analysis** storage
-
-### AI/ML
-- **OpenRouter API** for LLM analysis
-- **Multiple model support**
-- **Cost tracking** and optimization
-
-## 🏗️ Architecture
-
-```
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│   Frontend  │    │   Backend   │    │  Database   │
-│   (Vercel)  │◄──►│ (Railway)   │◄──►│  (Convex)   │
-└─────────────┘    └─────────────┘    └─────────────┘
-                           │
-                   ┌─────────────┐
-                   │    Redis    │
-                   │  (Caching)  │
-                   └─────────────┘
-```
-
-## 🚦 Getting Started
+## Getting Started
 
 ### Prerequisites
+
 - Node.js 20+
-- npm or yarn
-- Redis (for local development)
+- Redis (local or remote)
 
-### Local Development
+### Install and Run
 
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd nodewatch
-   ```
+```bash
+npm install
 
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
+# Terminal 1: API server
+npm run dev
 
-3. **Set up environment**
-   ```bash
-   cp .env.local.example .env.local
-   # Edit .env.local with your configuration
-   ```
+# Terminal 2: Worker process
+npm run worker:dev
+```
 
-4. **Start services**
-   ```bash
-   # Start Redis
-   npm run dev:redis
-   
-   # Start Convex
-   npm run dev:convex
-   
-   # Start backend
-   npm run dev
-   
-   # Start frontend (in another terminal)
-   npm run dev:frontend
-   ```
+### Run Tests
 
-5. **Access the application**
-   - Frontend: http://localhost:8080
-   - Backend API: http://localhost:3000
-   - Admin Panel: http://localhost:3000/admin
+```bash
+npm test
+```
 
-## 📦 Available Scripts
+### API
 
-### Development
-- `npm run dev` - Start backend server
-- `npm run dev:frontend` - Start frontend dev server
-- `npm run dev:all` - Start all services
-- `npm run dev:convex` - Start Convex development
+```
+POST /api/analyze          — Queue a package for analysis
+GET  /api/job/:id/status   — Check job progress
+GET  /api/job/:id/result   — Get analysis results
+GET  /api/stats             — System statistics
+GET  /api/queue/stats       — Queue statistics
+GET  /api/health/metrics    — Health check
+```
 
-### Building
-- `npm run build` - Build both frontend and backend
-- `npm run build:frontend` - Build frontend only
-- `npm run build:backend` - Build backend only
+## Project Structure
 
-### Deployment
-- `npm run deploy:vercel` - Deploy frontend to Vercel
-- `npm run deploy:railway` - Deploy backend to Railway
-- `npm run deploy:convex` - Deploy database to Convex
+```
+src/
+  analyzers/
+    static-analyzer.ts    — Core analysis engine (40+ patterns, obfuscation, typosquatting)
+    llm-analyzer.ts       — LLM integration (mock/stub)
+  services/
+    cost-tracker.ts       — LLM cost management
+    analytics.ts          — Event tracking
+  utils/
+    deobfuscation.ts      — Multi-encoding deobfuscation engine
+    redis.ts              — Redis connection and caching
+    cache-manager.ts      — Multi-tier cache
+    logger.ts             — Structured logging
+    hash.ts               — Content hashing
+  config/
+    index.ts              — Configuration with env validation
+  frontend/              — React 19 app (needs rebuild)
+  index.ts               — Express API server (~1030 lines)
+  worker.ts              — BullMQ worker process
+  pipeline.ts            — Analysis pipeline orchestration
+  npm-fetcher.ts         — NPM registry integration
+  __tests__/             — Jest test suite
+convex/
+  schema.ts              — Database schema (14 tables)
+  packages.ts            — Package CRUD
+  analysis.ts            — Analysis results storage
+  stats.ts               — System statistics
+  fileHashes.ts          — Content deduplication
+```
 
-## 🔧 Configuration
+## Configuration
 
-### Environment Variables
+Key environment variables (see `src/config/index.ts` for full list):
 
-#### Required
-- `CONVEX_URL` - Convex deployment URL
-- `OPENROUTER_API_KEY` - OpenRouter API key for LLM analysis
-- `REDIS_URL` - Redis connection string
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `REDIS_URL` | Yes | Redis connection string |
+| `CONVEX_URL` | For DB | Convex deployment URL |
+| `OPENROUTER_API_KEY` | For LLM | LLM API access |
+| `PORT` | No | Server port (default: 3000) |
+| `NODE_ENV` | No | Environment |
+| `LOG_LEVEL` | No | debug/info/warn/error |
 
-#### Optional
-- `NODE_ENV` - Environment (development/production)
-- `PORT` - Server port (default: 3000)
-- `LOG_LEVEL` - Logging level (debug/info/warn/error)
-- `ADMIN_USERNAME` - Admin panel username
-- `ADMIN_PASSWORD` - Admin panel password
+## License
 
-## 🔒 Security Features
-
-- **Static Analysis**: Code pattern detection
-- **Dynamic Analysis**: Runtime behavior monitoring
-- **LLM Analysis**: AI-powered threat detection
-- **File Deduplication**: Efficient storage and analysis
-- **Rate Limiting**: API protection
-- **Admin Authentication**: Secure management interface
-
-## 📊 Monitoring
-
-- **Real-time Statistics**: Live system metrics
-- **Cost Tracking**: LLM API usage monitoring
-- **Performance Metrics**: Response times and throughput
-- **Error Logging**: Comprehensive error tracking
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-## 📄 License
-
-MIT License - see LICENSE file for details
-
-## 🆘 Support
-
-- **Issues**: GitHub Issues
-- **Documentation**: See `/docs` directory
-- **Community**: Discord/Slack (links TBD)
-
----
-
-**NodeWatch** - Protecting the npm ecosystem, one package at a time. 🛡️✨
+MIT

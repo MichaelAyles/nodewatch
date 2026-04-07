@@ -1,25 +1,39 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import HomePage from './components/HomePage';
-import './App.css';
+import React, { useState } from 'react';
+import { SearchPage } from './components/SearchPage';
+import { StatsPage } from './components/StatsPage';
 
-const App: React.FC = () => {
+type View = 'analyze' | 'stats';
+
+export function App() {
+  const [view, setView] = useState<View>('analyze');
+
   return (
-    <Router>
-      <div className="app">
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          {/* Future routes will be added here */}
-          <Route path="/package/:name" element={<div>Package Detail Page (Coming Soon)</div>} />
-          <Route path="/browse" element={<div>Browse Packages Page (Coming Soon)</div>} />
-          <Route path="/search" element={<div>Search Results Page (Coming Soon)</div>} />
-          <Route path="/analytics" element={<div>Analytics Page (Coming Soon)</div>} />
-          <Route path="/reports" element={<div>Reports Page (Coming Soon)</div>} />
-          <Route path="/api-docs" element={<div>API Documentation (Coming Soon)</div>} />
-        </Routes>
-      </div>
-    </Router>
+    <div className="app-layout">
+      <header className="app-header">
+        <div className="app-header-left">
+          <div className="app-logo" onClick={() => setView('analyze')}>
+            node<span>watch</span>
+          </div>
+          <nav className="app-nav">
+            <button
+              className={view === 'analyze' ? 'active' : ''}
+              onClick={() => setView('analyze')}
+            >
+              Analyze
+            </button>
+            <button
+              className={view === 'stats' ? 'active' : ''}
+              onClick={() => setView('stats')}
+            >
+              System
+            </button>
+          </nav>
+        </div>
+      </header>
+      <main className="app-main">
+        {view === 'analyze' && <SearchPage />}
+        {view === 'stats' && <StatsPage />}
+      </main>
+    </div>
   );
-};
-
-export default App;
+}

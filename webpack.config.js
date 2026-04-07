@@ -45,14 +45,16 @@ module.exports = {
     }),
   ],
   devServer: {
-    contentBase: path.join(__dirname, 'dist/frontend'),
+    static: path.join(__dirname, 'dist/frontend'),
     compress: true,
-    port: 3000,
+    port: 8080,
     historyApiFallback: true,
-    proxy: {
-      '/api': 'http://localhost:3001',
-      '/admin': 'http://localhost:3001',
-    },
+    proxy: [
+      {
+        context: ['/api', '/admin'],
+        target: 'http://localhost:3000',
+      },
+    ],
   },
   mode: process.env.NODE_ENV === 'production' ? 'production' : 'development',
   devtool: process.env.NODE_ENV === 'production' ? 'source-map' : 'eval-source-map',

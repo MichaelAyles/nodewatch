@@ -1,126 +1,100 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## What This Project Is
 
-## Project Overview
+NodeWatch is an npm package malware detection system. It fetches packages from the npm registry, runs them through a multi-stage analysis pipeline, and produces risk scores. The core value is the static analysis engine — everything else is infrastructure to support it.
 
-NodeWatch is a comprehensive system for evaluating npm packages for malware detection. The system analyzes npm packages using static analysis, dynamic sandboxing, and LLM-powered code review to provide safety scores and identify potentially malicious code.
+## Current State (April 2025)
 
-## Architecture
+### Working
+- **Static analyzer** (`src/analyzers/static-analyzer.ts`, ~880 lines) — 40+ patterns, obfuscation detection, typosquatting, integrity checks. This is the heart of the project and it works well. Tested.
+- **Deobfuscation engine** (`src/utils/deobfuscation.ts`) — base64, hex, unicode, URL encoding. Entropy analysis.
+- **NPM fetcher** (`src/npm-fetcher.ts`) — downloads/extracts packages, SHA-256 hashing, file filtering.
+- **API server** (`src/index.ts`, ~1030 lines) — Express 5 with BullMQ job queue, WebSocket (Socket.io), multi-tier Redis caching. Has mock/fallback data paths for when Convex isn't connected.
+- **Worker** (`src/worker.ts`) — BullMQ worker, configurable concurrency, graceful shutdown.
+- **Pipeline** (`src/pipeline.ts`) — orchestrates fetch → static analysis → (mock) LLM → scoring.
+- **Config** (`src/config/index.ts`) — env loading, validation, typed config objects.
+- **Cost tracker** (`src/services/cost-tracker.ts`) — LLM cost management with budget alerts. Ready but nothing real to track yet.
+- **Tests** — 58 tests in `src/__tests__/`, Jest with ts-jest.
 
-The system follows a **persistent backend service architecture** with clear separation of concerns:
-
-### Service Layers
-1. **API Gateway Layer**: Express server handles job submission and status queries (non-blocking)
-2. **Job Queue Layer**: BullMQ manages analysis jobs with Redis backend
-3. **Worker Service Layer**: Persistent background workers process analysis jobs
-4. **Analysis Pipeline**: Multi-stage analysis within worker processes
-5. **Caching Layer**: Multi-tier caching with content deduplication
-6. **Data Layer**: Convex database for real-time data storage
-
-### Analysis Pipeline (Within Workers)
-1. **Content Deduplication**: SHA-256 based caching to avoid redundant analysis
-2. **Enhanced Static Analysis**: 40+ patterns, obfuscation detection, typosquatting analysis
-3. **Dynamic Sandbox Analysis**: Docker containers monitor package behavior
-4. **LLM Analysis**: AI-powered code review for suspicious patterns (cost-optimized)
-5. **Risk Scoring**: Weighted signal combination with confidence scoring
-
-## Key Components
-
-- **Backend API**: Node.js/Express service handling package analysis requests
-- **Worker Nodes**: Process analysis jobs from queue (BullMQ/Redis)
-- **Database**: PostgreSQL for package metadata, analysis results, and content storage
-- **Cache Layer**: Redis for job queuing and result caching
-- **Sandbox Environment**: Docker/Firecracker containers for safe package execution
-- **Frontend**: React/Vue application with package search and dependency visualization
+### Not Working / Stub
+- **LLM analyzer** (`src/analyzers/llm-analyzer.ts`) — mock implementation. Returns fabricated results based on static analysis output. No real API calls.
+- **Dynamic sandbox analysis** — Dockerode is a dependency but there's zero execution code. No packages are ever actually run.
+- **Convex integration** — schema defined in `convex/schema.ts` (14 tables), mutations/queries in `convex/*.ts`, but the pipeline has TODO comments where DB calls should go. `pipeline-with-db.ts` exists but isn't wired up.
+- **Frontend** (`src/frontend/`) — React 19 placeholder. Needs complete rebuild. Do not try to fix it, build fresh.
+- **Deployment** — Railway never worked. Vercel is frontend-only. Nothing is running in production.
+- **`semgrep` npm dependency** — this is NOT the real Semgrep (which is a Python binary). It's a placeholder v0.0.1 package. Dead weight.
+- **`generate:convex` script** — no-op, just echoes a string.
 
 ## Development Commands
 
-The system requires both API server and worker processes:
-
 ```bash
-# Install dependencies
-npm install
-
-# Development (requires 2 terminals)
-npm run dev         # Terminal 1: API server with hot reload
-npm run worker:dev  # Terminal 2: Worker service with hot reload
-
-# Production
-npm run start       # API server
-npm run worker      # Worker service (background)
-
-# Testing & Building
-npm test           # Run comprehensive test suite (58 tests)
-npm run build      # Compile TypeScript
-
-# Docker (full stack)
-npm run docker:build  # Build images
-npm run docker:run    # Start API + Workers + Redis
+npm install              # Install dependencies
+npm run dev              # API server with hot reload (tsx watch)
+npm run worker:dev       # Worker process with hot reload
+npm test                 # Run test suite (58 tests)
+npm run build            # Compile TypeScript + webpack frontend
+npm run dev:frontend     # Webpack dev server for frontend (port 8080)
 ```
 
-## Service Architecture
+The system needs both API server and worker running. Two terminals or use `npm run dev:all`.
 
-### API Server (`npm run dev`)
-- **Purpose**: Job management, status queries, result retrieval
-- **Port**: 3000 (configurable)
-- **Responsibilities**: 
-  - Queue analysis jobs (non-blocking)
-  - Provide job status and progress updates
-  - Serve web interface
-  - Manage queue statistics
+## Architecture
 
-### Worker Service (`npm run worker:dev`)  
-- **Purpose**: Background analysis processing
-- **Scaling**: Multiple workers can run in parallel
-- **Responsibilities**:
-  - Process analysis jobs from queue
-  - Execute multi-stage analysis pipeline
-  - Update job progress in real-time
-  - Store results in database and cache
+```
+Express API (port 3000)
+  ├── POST /api/analyze → BullMQ job queue → Redis
+  ├── GET /api/job/:id/status
+  ├── GET /api/job/:id/result
+  └── WebSocket (Socket.io) for real-time updates
 
-## Database Schema Considerations
+Worker Process (separate)
+  └── BullMQ worker → Analysis Pipeline
+        ├── 1. Fetch package from NPM registry
+        ├── 2. Extract and hash contents
+        ├── 3. Static analysis (40+ patterns)
+        ├── 4. LLM analysis (MOCK - not implemented)
+        └── 5. Risk scoring (0-100, safe/low/medium/high/critical)
+```
 
-When implementing the database, ensure these key tables:
-- `packages`: NPM package metadata
-- `versions`: Package version information
-- `contents`: Deduplicated file contents (SHA-256 indexed)
-- `analysis_results`: Results from each analysis stage
-- `dependencies`: Package dependency relationships
-- `scores`: Final risk scores and reasoning
+## Key Technical Notes
 
-## Analysis Pipeline Implementation
+- **`@types/*` packages are incorrectly in `dependencies`** instead of `devDependencies`. Should be fixed.
+- **Express 5** is used (was bleeding edge when the project started, more stable now).
+- **`src/index.ts` is ~1030 lines** — the API server. It's large but organized by route groups. Consider splitting if adding more routes.
+- **Redis is required** — the job queue won't work without it. The API server has fallback mock data for stats endpoints, but analysis requires Redis.
+- **Convex is optional** — the system degrades to mock data without it. The pipeline runs fine without DB persistence, it just doesn't save results.
+- **Multiple Dockerfiles exist** (Dockerfile, Dockerfile.api, Dockerfile.worker, Dockerfile.migrate) plus two compose files. None have been validated recently.
 
-When implementing analysis stages:
+## Analysis Pipeline Details
 
-1. **Static Analysis**: Integrate Semgrep with custom rules for npm-specific patterns (eval usage, network calls, filesystem access, obfuscation patterns)
-2. **Dynamic Analysis**: Monitor syscalls, network activity, file operations, and resource usage in sandboxed environments
-3. **LLM Analysis**: Only send pre-filtered suspicious code segments to reduce costs. Include context about why code was flagged.
+The static analyzer checks for:
+- Code execution: eval, Function constructor, setTimeout/setInterval with strings
+- Process spawning: child_process, exec, spawn
+- Network activity: HTTP/HTTPS requests, WebSockets, net connections
+- File system: write, unlink, chmod, access patterns
+- Prototype pollution: __proto__, Object.prototype modifications
+- Environment access: process.env, process.argv harvesting
+- Obfuscation: hex/unicode encoding, variable mangling, control flow obfuscation, packing, eval chains
+- Typosquatting: Levenshtein distance against 30+ popular package names
+- Integrity: suspicious install scripts, unexpected files, package.json inconsistencies
 
-## API Design Principles
+Risk scoring produces a 0-100 score with levels: safe, low, medium, high, critical.
 
-- RESTful endpoints for package queries
-- Webhook support for analysis completion notifications
-- Rate limiting for public API access
-- Batch processing support for efficiency
+## Testing
 
-## Performance Considerations
+```bash
+npm test              # Run all tests
+npm run test:watch    # Watch mode
+```
 
-- Content-based deduplication is critical - many packages share common dependencies
-- Use streaming for large package downloads
-- Implement intelligent caching at multiple levels
-- Queue prioritization based on package popularity/criticality
+Tests cover: static analyzer patterns, deobfuscation, content hashing, config validation, cache manager.
 
-## Security Requirements
+## What Needs To Happen Next
 
-- All package execution must occur in isolated sandbox environments
-- Never execute untrusted code outside containers
-- Implement resource limits for analysis jobs
-- Log all analysis activities for audit purposes
-
-## Testing Strategy
-
-- Unit tests for individual analysis modules
-- Integration tests for pipeline stages
-- End-to-end tests with known malicious packages
-- Performance tests for scaling validation
+1. **LLM integration** — replace mock with real Claude API calls. Only send pre-flagged suspicious code to keep costs down.
+2. **Database persistence** — wire up Convex mutations in the pipeline so results are actually saved.
+3. **Frontend rebuild** — start fresh, the current one is a shell.
+4. **Dynamic analysis** — implement actual sandbox execution in Docker containers.
+5. **Clean up dependencies** — move `@types/*` to devDependencies, remove dead `semgrep` package.
+6. **Deployment** — pick a platform and actually get it running.
