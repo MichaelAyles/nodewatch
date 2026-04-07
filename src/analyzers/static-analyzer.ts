@@ -92,10 +92,10 @@ export class EnhancedStaticAnalyzer {
       description: 'Spawns child processes'
     },
     {
-      pattern: /\.exec\s*\(/g,
+      pattern: /child_process.*\.exec\s*\(|execSync\s*\(/g,
       type: 'dynamic_require' as PatternType,
       severity: 'medium' as Severity,
-      description: 'Executes system commands'
+      description: 'Executes system commands via child_process'
     },
     {
       pattern: /\.spawn\s*\(/g,
@@ -182,19 +182,8 @@ export class EnhancedStaticAnalyzer {
       description: 'Modifies constructor prototype'
     },
 
-    // Obfuscation indicators
-    {
-      pattern: /\\x[0-9a-f]{2}/gi,
-      type: 'obfuscation' as PatternType,
-      severity: 'medium' as Severity,
-      description: 'Contains hex-encoded strings'
-    },
-    {
-      pattern: /\\u[0-9a-f]{4}/gi,
-      type: 'obfuscation' as PatternType,
-      severity: 'medium' as Severity,
-      description: 'Contains unicode-encoded strings'
-    },
+    // Obfuscation indicators — only flag patterns that are genuinely suspicious,
+    // not bare \x or \u which are common in regex ranges, i18n, and char maps
     {
       pattern: /Buffer\.from\s*\(\s*['"`]([A-Za-z0-9+/=]{50,})/g,
       type: 'obfuscation' as PatternType,
