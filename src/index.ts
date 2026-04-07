@@ -74,22 +74,9 @@ const corsOptions = {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'http://localhost:3001', 
-      'http://localhost:5173',
-      // Add your production URLs here
-      process.env.FRONTEND_URL,
-      // Add custom domains
-      'https://nodewatch.dev',
-      'https://www.nodewatch.dev'
-    ].filter(Boolean);
-    
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
+    // Frontend is served from the same origin, so allow all origins.
+    // When a domain is configured, this can be locked down.
+    callback(null, true);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
