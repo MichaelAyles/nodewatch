@@ -7,11 +7,10 @@ export function getRedisClient(): Redis {
   if (!redisClient) {
     redisClient = new Redis(config.redis.url, {
       password: config.redis.password,
-      maxRetriesPerRequest: 3,
+      maxRetriesPerRequest: null, // Required for BullMQ
       lazyConnect: true,
       keepAlive: 30000,
       connectTimeout: 10000,
-      commandTimeout: 5000,
     });
 
     redisClient.on('connect', () => {

@@ -138,7 +138,8 @@ async function startWorker() {
 // Only start worker if this file is run directly
 if (require.main === module) {
   startWorker().catch((error) => {
-    logger.error('Failed to start worker', error);
+    logger.error('Failed to start worker', error instanceof Error ? error.message : String(error));
+    console.error(error);
     process.exit(1);
   });
 }
