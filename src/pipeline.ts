@@ -20,10 +20,14 @@ export class AnalysisPipeline {
   private staticAnalyzer: StaticAnalyzer;
   private llmAnalyzer: LLMAnalyzer;
 
+  private llmEnabled: boolean;
+
   constructor() {
     this.fetcher = new NpmFetcher();
     this.staticAnalyzer = new StaticAnalyzer();
-    this.llmAnalyzer = new LLMAnalyzer();
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    this.llmAnalyzer = new LLMAnalyzer(apiKey);
+    this.llmEnabled = !!apiKey;
   }
 
   async analyzePackage(packageName: string, version = 'latest'): Promise<AnalysisResult> {
@@ -92,14 +96,15 @@ export class AnalysisPipeline {
   }
 
   private calculateOverallScore(staticResults: any, llmResults: any): number {
-    // Weighted average of different analysis scores
-    const staticWeight = 0.4;
-    const llmWeight = 0.6;
-    
     const staticScore = staticResults?.score || 0;
     const llmScore = llmResults?.score || 0;
-    
-    return Math.round(staticScore * staticWeight + llmScore * llmWeight);
+
+    // When LLM is real, weight it more heavily — it provides deeper analysis.
+    // When mock, rely entirely on static analysis.
+    if (this.llmEnabled) {
+      return Math.round(staticScore * 0.4 + llmScore * 0.6);
+    }
+    return staticScore;
   }
 
   private determineRiskLevel(score: number): 'safe' | 'low' | 'medium' | 'high' | 'critical' {

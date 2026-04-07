@@ -24,6 +24,10 @@ export interface Config {
 
   // LLM Configuration
   llm: {
+    anthropic: {
+      apiKey?: string;
+      model: string;
+    };
     openrouter: {
       apiKey?: string;
       baseUrl: string;
@@ -122,6 +126,10 @@ export const config: Config = {
   },
 
   llm: {
+    anthropic: {
+      apiKey: process.env.ANTHROPIC_API_KEY,
+      model: getEnvVar('LLM_MODEL', 'claude-sonnet-4-6'),
+    },
     openrouter: {
       apiKey: process.env.OPENROUTER_API_KEY,
       baseUrl: getEnvVar('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),

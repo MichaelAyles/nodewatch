@@ -10,7 +10,7 @@ process.env.CONVEX_URL = 'test-convex-url';
 process.env.CONVEX_DEPLOYMENT = 'test-deployment';
 
 // Mock external services in tests
-jest.mock('openai');
+jest.mock('@anthropic-ai/sdk');
 jest.mock('dockerode');
 jest.mock('ioredis');
 
