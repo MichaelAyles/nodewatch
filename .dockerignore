@@ -38,6 +38,9 @@ src/test
 logs
 *.log
 
+# Claude worktrees
+.claude
+
 # OS generated files
 .DS_Store
 Thumbs.db

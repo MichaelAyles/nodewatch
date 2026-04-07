@@ -1,8 +1,7 @@
 import { NpmFetcher } from './npm-fetcher';
 import { StaticAnalyzer } from './analyzers/static-analyzer';
 import { LLMAnalyzer } from './analyzers/llm-analyzer';
-import { convexClient, isConvexConfigured } from './convex-client';
-import { api } from '../convex/_generated/api';
+import { db } from './database/postgres-client';
 
 export interface AnalysisResult {
   package: {
@@ -23,6 +22,7 @@ export class AnalysisPipelineWithDB {
   private staticAnalyzer: StaticAnalyzer;
   private llmAnalyzer: LLMAnalyzer;
   private llmEnabled: boolean;
+  private dbEnabled: boolean;
 
   constructor() {
     this.fetcher = new NpmFetcher();
@@ -30,6 +30,7 @@ export class AnalysisPipelineWithDB {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     this.llmAnalyzer = new LLMAnalyzer(apiKey);
     this.llmEnabled = !!apiKey;
+    this.dbEnabled = !!process.env.DATABASE_URL;
   }
 
   async analyzePackage(packageName: string, version = 'latest'): Promise<AnalysisResult> {
@@ -38,15 +39,14 @@ export class AnalysisPipelineWithDB {
     console.log(`Starting analysis of ${packageName}@${version}`);
     const startTime = Date.now();
 
+    let packageId: string | undefined;
+
     try {
-      // Create package record in Convex (if configured)
-      let packageId: string | undefined;
-      if (isConvexConfigured()) {
-        packageId = await convexClient!.mutation(api.packages.submitPackage as any, {
-          name: packageName,
-          version,
-        });
+      // Create package record in Postgres
+      if (this.dbEnabled) {
+        packageId = await db.createPackage({ name: packageName, version });
         console.log(`Created package record: ${packageId}`);
+        await db.updatePackageStatus(packageId, 'analyzing');
       }
 
       // Fetch package metadata
@@ -72,13 +72,12 @@ export class AnalysisPipelineWithDB {
       const staticResults = await this.staticAnalyzer.analyze(files);
       const staticTime = Date.now() - staticStart;
 
-      // Save static analysis results to Convex
-      if (isConvexConfigured() && packageId) {
-        await convexClient!.mutation(api.analysis.saveAnalysisResult as any, {
-          package_id: packageId,
+      if (this.dbEnabled && packageId) {
+        await db.saveAnalysisResult({
+          packageId,
           stage: 'static',
           results: staticResults,
-          processing_time_ms: staticTime,
+          processingTimeMs: staticTime,
         });
       }
 
@@ -88,13 +87,12 @@ export class AnalysisPipelineWithDB {
       const llmResults = await this.llmAnalyzer.analyze(packageName, files, staticResults);
       const llmTime = Date.now() - llmStart;
 
-      // Save LLM analysis results to Convex
-      if (isConvexConfigured() && packageId) {
-        await convexClient!.mutation(api.analysis.saveAnalysisResult as any, {
-          package_id: packageId,
+      if (this.dbEnabled && packageId) {
+        await db.saveAnalysisResult({
+          packageId,
           stage: 'llm',
           results: llmResults,
-          processing_time_ms: llmTime,
+          processingTimeMs: llmTime,
         });
       }
 
@@ -102,30 +100,25 @@ export class AnalysisPipelineWithDB {
       const overallScore = this.calculateOverallScore(staticResults, llmResults);
       const riskLevel = this.determineRiskLevel(overallScore);
 
-      // Save risk score to Convex
-      if (isConvexConfigured() && packageId) {
+      if (this.dbEnabled && packageId) {
         const reasons = [
           ...(staticResults.suspicious_patterns?.map((p: any) => p.description) || []),
           ...(llmResults.reasons || []),
         ].slice(0, 10);
 
-        await convexClient!.mutation(api.analysis.saveRiskScore as any, {
-          package_id: packageId,
-          overall_score: overallScore,
-          static_score: staticResults?.score,
-          llm_score: llmResults?.score,
+        await db.saveRiskScore({
+          packageId,
+          overallScore,
+          staticScore: staticResults?.score,
+          llmScore: llmResults?.score,
           reasons,
+          calculationTimeMs: Date.now() - startTime,
         });
 
-        // Update package status to completed
-        await convexClient!.mutation(api.packages.updatePackageStatus as any, {
-          id: packageId,
-          status: 'completed',
-          registry_data: {
-            description: metadata.description,
-            tarball_url: metadata.dist.tarball,
-            dependencies: metadata.dependencies,
-          },
+        await db.updatePackageStatus(packageId, 'completed', {
+          description: metadata.description,
+          tarball_url: metadata.dist.tarball,
+          dependencies: metadata.dependencies,
         });
       }
 
@@ -146,16 +139,11 @@ export class AnalysisPipelineWithDB {
         package_id: packageId,
       };
     } catch (error) {
-      // Mark package as failed in Convex
-      if (isConvexConfigured() && arguments[2]) {
+      if (this.dbEnabled && packageId) {
         try {
-          await convexClient!.mutation(api.packages.updatePackageStatus as any, {
-            id: arguments[2],
-            status: 'failed',
-          });
+          await db.updatePackageStatus(packageId, 'failed');
         } catch (_) { /* best effort */ }
       }
-
       console.error(`Analysis failed for ${packageName}@${version}:`, error);
       throw error;
     }

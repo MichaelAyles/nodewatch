@@ -11,6 +11,10 @@ export interface Config {
   logLevel: string;
 
   // Database Configuration
+  database: {
+    url: string;
+  };
+
   convex: {
     url: string;
     deployment: string;
@@ -115,6 +119,10 @@ export const config: Config = {
   nodeEnv,
   logLevel: getEnvVar('LOG_LEVEL', 'info'),
 
+  database: {
+    url: getEnvVar('DATABASE_URL', ''),
+  },
+
   convex: {
     url: getEnvVar('CONVEX_URL', nodeEnv === 'test' ? 'test-convex-url' : ''),
     deployment: getEnvVar('CONVEX_DEPLOYMENT', nodeEnv === 'test' ? 'test-deployment' : ''),
@@ -184,16 +192,7 @@ export const config: Config = {
 export function validateConfig(): void {
   const errors: string[] = [];
 
-  // Only validate Convex in non-test environments
-  if (config.nodeEnv !== 'test') {
-    if (!config.convex.url) {
-      errors.push('CONVEX_URL is required');
-    }
-
-    if (!config.convex.deployment) {
-      errors.push('CONVEX_DEPLOYMENT is required');
-    }
-  }
+  // Convex is optional — Postgres is the primary database now
 
   if (config.nodeEnv === 'production') {
     if (!config.llm.openrouter.apiKey) {
