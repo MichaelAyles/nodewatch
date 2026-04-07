@@ -276,62 +276,53 @@ export class EnhancedStaticAnalyzer {
 
     // Analyze each file for suspicious patterns
     for (const [filePath, content] of files) {
+      // Skip minified files — they trigger false positives on everything
+      const isMinified = this.isMinifiedFile(filePath, content);
+
       // Skip non-JS/TS files for pattern analysis
       if (this.isJavaScriptFile(filePath)) {
         await this.analyzeFilePatterns(filePath, content, result);
       }
 
-      // Enhanced deobfuscation analysis
-      const deobfuscationResult = await this.deobfuscationEngine.deobfuscate(content);
-      if (deobfuscationResult.confidence > 0.3) {
-        result.riskIndicators.has_obfuscated_code = true;
-        result.obfuscationScore = Math.max(result.obfuscationScore, deobfuscationResult.confidence * 100);
-        
-        // Add deobfuscation findings
-        result.suspiciousPatterns.push({
-          type: 'obfuscation',
-          file: filePath,
-          line: 0,
-          snippet: deobfuscationResult.originalContent.substring(0, 100),
-          severity: deobfuscationResult.confidence > 0.7 ? 'high' : 'medium',
-          description: `Encoded content detected: ${deobfuscationResult.encodingTypes.join(', ')}`,
-          confidence: deobfuscationResult.confidence
-        });
+      // Skip deobfuscation on minified files and non-JS files — too noisy
+      if (!isMinified && this.isJavaScriptFile(filePath)) {
+        // Only run deobfuscation if the file has genuinely suspicious encoded content
+        // (not just regex patterns or character mapping tables)
+        const strippedContent = this.stripLegitimateEncodings(content);
+        const deobfuscationResult = await this.deobfuscationEngine.deobfuscate(strippedContent);
 
-        // Add suspicious strings found in deobfuscated content
-        for (const suspiciousString of deobfuscationResult.suspiciousStrings) {
+        if (deobfuscationResult.confidence > 0.5 && deobfuscationResult.suspiciousStrings.length > 0) {
+          result.riskIndicators.has_obfuscated_code = true;
+          result.obfuscationScore = Math.max(result.obfuscationScore, deobfuscationResult.confidence * 100);
+
+          // One finding per file for encoded content (not per-match)
           result.suspiciousPatterns.push({
             type: 'obfuscation',
             file: filePath,
             line: 0,
-            snippet: suspiciousString.substring(0, 100),
+            snippet: deobfuscationResult.suspiciousStrings[0]?.substring(0, 100) || '',
             severity: 'high',
-            description: 'Suspicious content found in deobfuscated string',
-            confidence: 0.9
+            description: `Suspicious encoded content: ${deobfuscationResult.encodingTypes.join(', ')}`,
+            confidence: deobfuscationResult.confidence
           });
         }
 
-        // If we have deobfuscated content, analyze it for additional patterns
-        if (deobfuscationResult.deobfuscatedContent !== deobfuscationResult.originalContent) {
-          await this.analyzeFilePatterns(filePath + ' (deobfuscated)', deobfuscationResult.deobfuscatedContent, result);
+        // Legacy obfuscation analysis — only for techniques not covered by deob engine
+        const legacyObfuscationAnalysis = this.analyzeObfuscation(content);
+        if (legacyObfuscationAnalysis.isObfuscated) {
+          result.riskIndicators.has_obfuscated_code = true;
+          result.obfuscationScore = Math.max(result.obfuscationScore, legacyObfuscationAnalysis.confidence * 100);
+
+          result.suspiciousPatterns.push({
+            type: 'obfuscation',
+            file: filePath,
+            line: 0,
+            snippet: content.substring(0, 100),
+            severity: 'high',
+            description: `Obfuscated code detected (${legacyObfuscationAnalysis.techniques.join(', ')})`,
+            confidence: legacyObfuscationAnalysis.confidence
+          });
         }
-      }
-
-      // Legacy obfuscation analysis (supplements deobfuscation engine)
-      const legacyObfuscationAnalysis = this.analyzeObfuscation(content);
-      if (legacyObfuscationAnalysis.isObfuscated) {
-        result.riskIndicators.has_obfuscated_code = true;
-        result.obfuscationScore = Math.max(result.obfuscationScore, legacyObfuscationAnalysis.confidence * 100);
-
-        result.suspiciousPatterns.push({
-          type: 'obfuscation',
-          file: filePath,
-          line: 0,
-          snippet: content.substring(0, 100),
-          severity: 'high',
-          description: `Obfuscated code detected (${legacyObfuscationAnalysis.techniques.join(', ')})`,
-          confidence: legacyObfuscationAnalysis.confidence
-        });
       }
     }
 
@@ -379,17 +370,20 @@ export class EnhancedStaticAnalyzer {
   }
 
   private async analyzeFilePatterns(
-    filePath: string, 
-    content: string, 
+    filePath: string,
+    content: string,
     result: StaticAnalysisResult
   ): Promise<void> {
-    // Analyze suspicious patterns
+    // Analyze suspicious patterns — one finding per pattern type per file
+    const seenTypes = new Set<string>();
     for (const { pattern, type, severity, description } of this.suspiciousPatterns) {
-      const matches = Array.from(content.matchAll(pattern));
-      for (const match of matches) {
+      if (seenTypes.has(type + description)) continue;
+      const match = content.match(pattern);
+      if (match) {
+        seenTypes.add(type + description);
         const line = this.getLineNumber(content, match.index || 0);
         const snippet = this.extractSnippet(content, match.index || 0);
-        
+
         result.suspiciousPatterns.push({
           type,
           file: filePath,
@@ -400,7 +394,6 @@ export class EnhancedStaticAnalyzer {
           confidence: 0.8
         });
 
-        // Update risk indicators
         this.updateRiskIndicators(type, result.riskIndicators);
       }
     }
@@ -419,66 +412,43 @@ export class EnhancedStaticAnalyzer {
     content: string,
     result: StaticAnalysisResult
   ): Promise<void> {
+    // Skip minified files — they produce massive false positive noise
+    if (this.isMinifiedFile(filePath, content)) return;
+
     const stringLiterals = StringAnalyzer.extractStringLiterals(content);
-    
+
+    // Aggregate findings per file instead of per string
+    let hasHighEntropy = false;
+    let hasSuspiciousPatterns: string[] = [];
+    let maxObfuscationScore = 0;
+
     for (const literal of stringLiterals) {
       const analysis = StringAnalyzer.analyzeString(literal);
-      
-      // Check for high entropy (potential obfuscation)
-      if (analysis.entropy > 6) {
-        result.suspiciousPatterns.push({
-          type: 'obfuscation',
-          file: filePath,
-          line: 0,
-          snippet: literal.substring(0, 50),
-          severity: 'medium',
-          description: `High entropy string (${analysis.entropy.toFixed(2)}) suggests obfuscation`,
-          confidence: Math.min(0.9, analysis.entropy / 8)
-        });
-      }
 
-      // Check for encoded content in strings
-      if (analysis.hasEncodedContent) {
-        result.riskIndicators.has_base64_strings = true;
-        result.suspiciousPatterns.push({
-          type: 'obfuscation',
-          file: filePath,
-          line: 0,
-          snippet: literal.substring(0, 50),
-          severity: 'medium',
-          description: 'String contains encoded content',
-          confidence: 0.7
-        });
-      }
-
-      // Check for suspicious patterns in strings
+      if (analysis.entropy > 6) hasHighEntropy = true;
       if (analysis.suspiciousPatterns.length > 0) {
-        result.suspiciousPatterns.push({
-          type: 'obfuscation',
-          file: filePath,
-          line: 0,
-          snippet: literal.substring(0, 50),
-          severity: 'high',
-          description: `Suspicious patterns in string: ${analysis.suspiciousPatterns.join(', ')}`,
-          confidence: 0.8
-        });
+        hasSuspiciousPatterns.push(...analysis.suspiciousPatterns);
       }
+      maxObfuscationScore = Math.max(maxObfuscationScore, analysis.obfuscationScore);
+    }
 
-      // High obfuscation score
-      if (analysis.obfuscationScore > 0.6) {
-        result.riskIndicators.has_obfuscated_code = true;
-        result.obfuscationScore = Math.max(result.obfuscationScore, analysis.obfuscationScore * 100);
-        
-        result.suspiciousPatterns.push({
-          type: 'obfuscation',
-          file: filePath,
-          line: 0,
-          snippet: literal.substring(0, 50),
-          severity: 'high',
-          description: `Highly obfuscated string (score: ${(analysis.obfuscationScore * 100).toFixed(0)})`,
-          confidence: analysis.obfuscationScore
-        });
-      }
+    // Deduplicated suspicious patterns per file
+    const uniquePatterns = [...new Set(hasSuspiciousPatterns)];
+    if (uniquePatterns.length > 0) {
+      result.suspiciousPatterns.push({
+        type: 'obfuscation',
+        file: filePath,
+        line: 0,
+        snippet: '',
+        severity: 'high',
+        description: `Suspicious patterns in strings: ${uniquePatterns.join(', ')}`,
+        confidence: 0.8
+      });
+    }
+
+    if (maxObfuscationScore > 0.7) {
+      result.riskIndicators.has_obfuscated_code = true;
+      result.obfuscationScore = Math.max(result.obfuscationScore, maxObfuscationScore * 100);
     }
   }
 
@@ -564,18 +534,22 @@ export class EnhancedStaticAnalyzer {
   }
 
   private detectStringEncoding(content: string): boolean {
+    // Strip out regex patterns and character mapping objects first —
+    // these legitimately use hex/unicode escapes (e.g. lodash's deburr)
+    const stripped = this.stripLegitimateEncodings(content);
+
     const indicators = [
-      // Hex encoding (lowered threshold)
-      /\\x[0-9a-f]{2}/gi.test(content) && (content.match(/\\x[0-9a-f]{2}/gi)?.length || 0) > 3,
-      // Unicode encoding (lowered threshold)
-      /\\u[0-9a-f]{4}/gi.test(content) && (content.match(/\\u[0-9a-f]{4}/gi)?.length || 0) > 2,
-      // Base64 strings (lowered threshold)
-      /[A-Za-z0-9+/=]{30,}/g.test(content),
-      // Excessive string concatenation (lowered threshold)
-      /['"`]\s*\+\s*['"`]/g.test(content) && (content.match(/['"`]\s*\+\s*['"`]/g)?.length || 0) > 5
+      // Hex encoding outside of regexes/char maps
+      (stripped.match(/\\x[0-9a-f]{2}/gi)?.length || 0) > 10,
+      // Unicode encoding outside of regexes/char maps
+      (stripped.match(/\\u[0-9a-f]{4}/gi)?.length || 0) > 10,
+      // Long base64 strings
+      /[A-Za-z0-9+/=]{50,}/g.test(stripped),
+      // Excessive string concatenation
+      (content.match(/['"`]\s*\+\s*['"`]/g)?.length || 0) > 10
     ];
 
-    return indicators.filter(Boolean).length >= 1; // Changed from 2 to 1
+    return indicators.filter(Boolean).length >= 2;
   }
 
   private detectVariableMangling(content: string): boolean {
@@ -609,12 +583,10 @@ export class EnhancedStaticAnalyzer {
 
   private detectDeadCode(content: string): boolean {
     const indicators = [
-      // Unreachable code after return
-      /return\s*[^;]*;\s*\w+/.test(content),
-      // Empty functions
-      (content.match(/function\s*\w*\s*\(\s*\)\s*\{\s*\}/g)?.length || 0) > 5,
-      // Unused variables
-      /var\s+\w+\s*=\s*[^;]+;\s*(?!.*\w+)/.test(content)
+      // Many empty functions — potential stub/placeholder code
+      (content.match(/function\s*\w*\s*\(\s*\)\s*\{\s*\}/g)?.length || 0) > 10,
+      // Massive number of unreferenced assignments — potential junk code injection
+      (content.match(/var\s+_0x[a-f0-9]+\s*=/g)?.length || 0) > 5,
     ];
 
     return indicators.filter(Boolean).length >= 1;
@@ -821,6 +793,36 @@ export class EnhancedStaticAnalyzer {
     return /\.(js|jsx|ts|tsx|mjs|cjs)$/.test(filename);
   }
 
+  /**
+   * Detect minified files — they trigger massive false positives.
+   * Minified files have very long lines and/or .min. in the name.
+   */
+  private isMinifiedFile(filename: string, content: string): boolean {
+    if (/\.min\.(js|css)$/.test(filename)) return true;
+    // If any line is > 1000 chars, likely minified
+    const lines = content.split('\n');
+    if (lines.length < 5 && content.length > 5000) return true;
+    return lines.some(line => line.length > 1000);
+  }
+
+  /**
+   * Strip out legitimate uses of hex/unicode encoding so the deob engine
+   * doesn't flag them. This includes:
+   * - Regex patterns: /[\x00-\x2f]/ or /[\u0300-\u036f]/
+   * - Character mapping objects: '\xc0': 'A', '\u0100': 'A'
+   * - Regex string builders: var range = '\\ud800-\\udfff'
+   */
+  private stripLegitimateEncodings(content: string): string {
+    let stripped = content;
+    // Remove regex literals containing hex/unicode ranges
+    stripped = stripped.replace(/\/[^\/\n]*(?:\\x[0-9a-f]{2}|\\u[0-9a-f]{4})[^\/\n]*\/[gimsuy]*/gi, '/* regex */');
+    // Remove character mapping entries like '\xc0': 'A' or '\u0100': 'A'
+    stripped = stripped.replace(/['"]\\[xu][0-9a-f]{2,4}['"]\s*:\s*['"][^'"]*['"]/gi, '"_": "_"');
+    // Remove regex string builders like '\\ud800-\\udfff'
+    stripped = stripped.replace(/['"](?:\\\\[xu][0-9a-f]{2,4}[-\\\\xu0-9a-f]*)+['"]/gi, '""');
+    return stripped;
+  }
+
   private getLineNumber(content: string, index: number): number {
     return content.substring(0, index).split('\n').length;
   }
@@ -834,29 +836,43 @@ export class EnhancedStaticAnalyzer {
   private calculateScore(result: StaticAnalysisResult): number {
     let score = 0;
 
-    // Add points for each suspicious pattern with confidence weighting
+    // Score by unique finding types per file, not raw count.
+    // This prevents a package with 600 files from scoring 100x higher
+    // than one with 1 file for the same types of patterns.
+    const findingsByType = new Map<string, { maxSeverity: Severity; maxConfidence: number }>();
     for (const pattern of result.suspiciousPatterns) {
-      const baseScore = pattern.severity === 'high' ? 20 : 
-                      pattern.severity === 'medium' ? 10 : 5;
-      score += baseScore * pattern.confidence;
+      const key = `${pattern.type}:${pattern.description.split(':')[0]}`;
+      const existing = findingsByType.get(key);
+      if (!existing || pattern.confidence > existing.maxConfidence) {
+        findingsByType.set(key, {
+          maxSeverity: pattern.severity,
+          maxConfidence: pattern.confidence,
+        });
+      }
+    }
+
+    for (const { maxSeverity, maxConfidence } of findingsByType.values()) {
+      const baseScore = maxSeverity === 'high' ? 15 :
+                        maxSeverity === 'medium' ? 8 : 3;
+      score += baseScore * maxConfidence;
     }
 
     // Add points for risk indicators
     const indicators = result.riskIndicators;
-    if (indicators.uses_eval) score += 25;
-    if (indicators.uses_dynamic_require) score += 15;
-    if (indicators.makes_network_calls) score += 10;
-    if (indicators.accesses_filesystem) score += 10;
-    if (indicators.has_obfuscated_code) score += 30;
-    if (indicators.has_base64_strings) score += 10;
-    if (indicators.modifies_prototype) score += 20;
+    if (indicators.uses_eval) score += 20;
+    if (indicators.uses_dynamic_require) score += 10;
+    if (indicators.makes_network_calls) score += 8;
+    if (indicators.accesses_filesystem) score += 8;
+    if (indicators.has_obfuscated_code) score += 15;
+    if (indicators.has_base64_strings) score += 5;
+    if (indicators.modifies_prototype) score += 15;
 
-    // Add obfuscation and typosquatting scores
-    score += result.obfuscationScore * 0.3;
+    // Add obfuscation and typosquatting scores (capped contribution)
+    score += Math.min(15, result.obfuscationScore * 0.15);
     score += result.typosquattingScore * 0.2;
 
     // Add integrity issues
-    score += result.integrityFlags.length * 15;
+    score += Math.min(20, result.integrityFlags.length * 10);
 
     return Math.min(100, Math.round(score));
   }
